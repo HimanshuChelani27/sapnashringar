@@ -1,0 +1,15 @@
+[Unit]
+Description=Sapna Garba
+After=network.target
+
+[Service]
+User=garba
+WorkingDirectory=/opt/sapna/backend
+Environment=GARBA_DATA=/var/lib/sapna
+# holds GARBA_ADMIN_PASSWORD=... and GARBA_SECRET=... (chmod 600)
+EnvironmentFile=/etc/sapna.env
+ExecStart=/opt/sapna/backend/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --proxy-headers
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

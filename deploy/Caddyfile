@@ -1,0 +1,13 @@
+# /etc/caddy/Caddyfile — Caddy gets HTTPS certificates automatically.
+# Replace the domain. FastAPI serves /garba/* (React build), /api/* and /uploads/*.
+sapnagarba.in, www.sapnagarba.in {
+	encode gzip
+	request_body {
+		max_size 100MB
+	}
+	# file names never change, so phones can cache photos and JS/CSS forever
+	header /uploads/* Cache-Control "public, max-age=31536000, immutable"
+	header /garba/assets/* Cache-Control "public, max-age=31536000, immutable"
+	# Other businesses can live beside it later, e.g. handle /boutique/* { ... }
+	reverse_proxy 127.0.0.1:8000
+}
