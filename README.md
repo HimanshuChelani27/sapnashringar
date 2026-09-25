@@ -24,28 +24,18 @@ npm run dev          # open http://localhost:5173/garba/home
 - On first use, go to **Admin → Settings** and fill in the UPI ID, the QR image, the WhatsApp number, the Navratri first night, and the rules.
 - Tests: `.venv/Scripts/pip install pytest httpx && .venv/Scripts/python -m pytest`
 
-## Deploy (Ubuntu VPS, about ₹400–500 a month)
+## Deploy (sapnashringar.com)
 
-1. Point your domain's A record to the server IP.
-2. Install the packages and copy the code:
-   ```sh
-   sudo apt install -y python3-venv sqlite3 caddy nodejs npm
-   sudo useradd -r -m garba && sudo mkdir -p /opt/sapna /var/lib/sapna && sudo chown garba /var/lib/sapna
-   # copy this folder to /opt/sapna (git clone or scp)
-   cd /opt/sapna/frontend && npm ci && npm run build
-   cd /opt/sapna/backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-   ```
-3. Create the secrets file. **Do not skip this**: the default password is `admin`.
-   ```sh
-   printf 'GARBA_ADMIN_PASSWORD=%s\nGARBA_SECRET=%s\n' 'your-strong-password' "$(openssl rand -hex 32)" | sudo tee /etc/sapna.env
-   sudo chmod 600 /etc/sapna.env
-   ```
-4. Start the services:
-   ```sh
-   sudo cp /opt/sapna/deploy/garba.service /etc/systemd/system/ && sudo systemctl enable --now garba
-   sudo cp /opt/sapna/deploy/Caddyfile /etc/caddy/Caddyfile   # edit the domain first
-   sudo systemctl reload caddy
-   ```
-5. Set up backups: `sudo crontab -e` and add `30 2 * * * /opt/sapna/deploy/backup.sh`. Then set up rclone to copy the backups off the server.
+Live site: https://sapnashringar.com/garba/home · admin: /garba/admin
 
-To update the site later: pull the code, run `npm run build` in `frontend/`, then `sudo systemctl restart garba`.
+**First time**
+1. Buy an Ubuntu 24.04 VPS (1 GB RAM is enough). While creating it, add the public key from `~/.ssh/sapna_deploy.pub`.
+2. In GoDaddy DNS, set two **A** records to the server IP: one for `@` and one for `www`.
+3. From this folder, run `sh deploy/push.sh root@<server-ip> setup`. This installs everything, turns on HTTPS, backups and the firewall, and prints the admin password.
+
+**Every update**
+Commit your changes, then run `sh deploy/push.sh root@<server-ip>`.
+
+- The server keeps data in `/var/lib/sapna` (database, photos, payment screenshots). Updates never touch it.
+- Secrets live in `/etc/sapna.env`. To change the admin password, edit that file, then run `systemctl restart garba`.
+- Backups run every night into `/var/backups/sapna`, and the last 30 days are kept. Also copy them off the server, for example with rclone to Google Drive.
