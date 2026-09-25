@@ -15,6 +15,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
@@ -36,6 +38,7 @@ EARNED = "('confirmed','out','returned')"
 GENDERS = {"women", "girls", "men", "boys", "kids"}
 ADDON_KINDS = {"jewellery", "pagdi", "umbrella", "dupatta", "other"}
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+PHOTO_PX = 1200  # longest side of the dress-page photo; 1600 = more zoom detail, ~2x the KB
 MAX_IMG = 25 * 1024 * 1024  # raw iPhone photos; we shrink them on save
 SETTING_KEYS = ("upi_id", "whatsapp_number", "shop_address", "pickup_rules", "upi_qr", "navratri_start")
 
@@ -73,6 +76,16 @@ def init_db():
 init_db()
 app = FastAPI(title="Sapna Garba")
 app.mount("/uploads", StaticFiles(directory=PHOTOS), name="uploads")
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.middleware("http")
+async def cache_forever(request: Request, call_next):
+    # photo and JS/CSS file names never change, so phones can keep them forever
+    r = await call_next(request)
+    if r.status_code == 200 and request.url.path.startswith(("/uploads/", "/garba/assets/")):
+        r.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return r
 
 
 # ---------- helpers ----------
@@ -115,7 +128,7 @@ def parse_ids(s):
         raise HTTPException(400, "Bad extras list")
 
 
-async def save_image(f: UploadFile, folder: Path, *, size=1200, thumb=False) -> str:
+async def save_image(f: UploadFile, folder: Path, *, size=None, thumb=False) -> str:
     """Shrink every upload: <name>.webp (~150 KB) and, for catalog photos, <name>_t.jpg (~40 KB) for lists
     and WhatsApp link previews. Originals are not kept."""
     ext = Path(f.filename or "").suffix.lower()
@@ -131,7 +144,7 @@ async def save_image(f: UploadFile, folder: Path, *, size=1200, thumb=False) -> 
     # ponytail: resizing runs on the request thread (~0.3 s/photo); fine for one admin uploading.
     name = secrets.token_hex(12)
     big = im.copy()
-    big.thumbnail((size, size))
+    big.thumbnail((size or PHOTO_PX, size or PHOTO_PX))
     big.save(folder / f"{name}.webp", quality=82)
     if thumb:
         im.thumbnail((480, 480))

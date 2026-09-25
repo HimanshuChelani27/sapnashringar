@@ -33,6 +33,8 @@ def test_full_flow():
     assert Image.open(PHOTOS / photo.replace(".webp", "_t.jpg")).size == (480, 320)
     assert c.post("/api/bookings", files={"screenshot": ("x.png", b"junk", "image/png")},
                   data={"dress_id": did, "date": DAY, "name": "X", "phone": "9999999999"}).status_code == 400
+    r = c.get("/uploads/" + photo)
+    assert "immutable" in r.headers["cache-control"]
     page = with_preview("<head></head>", f"dresses/{did}", "https://x.in/")
     assert 'og:title" content="Rani pink' in page and "_t.jpg" in page
 
