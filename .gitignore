@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 frontend/node_modules/
 frontend/dist/
+
+# catalog data (photos are large; keep them out of git)
+Sapna-Catalog.xlsx
+sapna-photos/
+sample-photos/
