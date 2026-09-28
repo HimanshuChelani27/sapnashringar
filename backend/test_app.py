@@ -82,6 +82,15 @@ def test_full_flow():
     st = c.get("/api/bookings/status", params={"code": b["code"], "phone": "9825012345"}).json()
     assert st["status"] == "rejected"
 
+    # delete: refused for a booked dress, removes an unbooked one with its photo files
+    assert c.delete(f"/api/admin/dresses/{did}", headers=H).status_code == 409
+    spare = c.post("/api/admin/dresses", headers=H, files={"photos": PNG},
+                   data={"code": "T1", "name": "Test", "gender": "women", "rent": 100}).json()["id"]
+    spare_photo = c.get(f"/api/dresses/{spare}").json()["photos"][0]
+    assert c.delete(f"/api/admin/dresses/{spare}", headers=H).status_code == 200
+    assert c.get(f"/api/dresses/{spare}").status_code == 404
+    assert not (PHOTOS / spare_photo).exists() and not (PHOTOS / spare_photo.replace(".webp", "_t.jpg")).exists()
+
 
 def test_migrate_girls_boys_to_kids():
     new = (HERE / "schema.sql").read_text()

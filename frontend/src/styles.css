@@ -68,6 +68,7 @@ h1, h2, p { margin: 0; }
 .err { color: var(--red); background: var(--red-soft); padding: 10px 12px; border-radius: 10px; font-size: 14px; }
 .link { color: var(--rani); font-weight: 600; }
 .linkbtn { color: var(--rani); font-weight: 600; padding: 6px 4px; }
+.linkbtn.danger { color: var(--red); align-self: center; }
 .note { background: var(--haldi-soft); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
 .price { font-weight: 700; font-variant-numeric: tabular-nums; }
 .price.lg { font-size: 20px; }

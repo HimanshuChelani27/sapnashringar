@@ -383,6 +383,18 @@ def delete_photo(pid: int):
     return {"ok": True}
 
 
+@adm.delete("/dresses/{did}")
+def delete_dress(did: int):
+    """Delete a dress and its photo files. Refused once it has bookings: their history and revenue point at it."""
+    if one("SELECT 1 FROM bookings WHERE dress_id=? LIMIT 1", (did,)):
+        raise HTTPException(409, "This dress has bookings, so it can't be deleted. "
+                                 "Untick 'Show on website' to hide it instead.")
+    for p in rows("SELECT id FROM dress_photos WHERE dress_id=?", (did,)):
+        delete_photo(p["id"])
+    run("DELETE FROM dresses WHERE id=?", (did,))
+    return {"ok": True}
+
+
 def addon_form(name: str = Form(...), kind: str = Form("other"), description: str = Form(""),
                price: int = Form(0, ge=0), deposit: int = Form(0, ge=0), active: bool = Form(True)):
     if kind not in ADDON_KINDS:

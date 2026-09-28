@@ -435,6 +435,13 @@ function DressEditor({ dress, reload }) {
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
   const delPhoto = pid => api(`/admin/photos/${pid}`, { method: 'DELETE', admin: true }).then(reload)
+  const delDress = async () => {
+    if (!window.confirm(`Delete ${dress.code} ${dress.name} and all its photos? This can't be undone.`)) return
+    try {
+      await api(`/admin/dresses/${dress.id}`, { method: 'DELETE', admin: true })
+      nav('/admin/dresses')
+    } catch (x) { setErr(x.message) }
+  }
   return (
     <main className="body">
       <form className="col" onSubmit={save}>
@@ -468,6 +475,7 @@ function DressEditor({ dress, reload }) {
         <label className="check"><input type="checkbox" checked={f.active} onChange={set('active')} /><span className="grow">Show on website</span></label>
         {err && <p className="err">{err}</p>}
         <button className="btn" disabled={busy}>{busy ? 'Saving…' : 'Save dress'}</button>
+        {dress && <button type="button" className="linkbtn danger" onClick={delDress}>Delete this dress</button>}
       </form>
     </main>
   )
