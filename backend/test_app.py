@@ -87,7 +87,12 @@ def test_full_flow():
     spare = c.post("/api/admin/dresses", headers=H, files={"photos": PNG},
                    data={"code": "T1", "name": "Test", "gender": "women", "rent": 100}).json()["id"]
     spare_photo = c.get(f"/api/dresses/{spare}").json()["photos"][0]
-    assert c.delete(f"/api/admin/dresses/{spare}", headers=H).status_code == 200
+    test = c.post("/api/admin/bookings", headers=H, data={"dress_id": spare, "date": DAY, "name": "Test"}).json()
+    assert c.delete(f"/api/admin/dresses/{spare}", headers=H).status_code == 409  # live booking blocks it
+    c.patch(f"/api/admin/bookings/{test['id']}", headers=H, json={"status": "cancelled"})
+    assert c.delete(f"/api/admin/dresses/{spare}", headers=H).status_code == 200  # cancelled one doesn't
+    kept = [x for x in c.get("/api/admin/bookings", headers=H).json() if x["id"] == test["id"]][0]
+    assert kept["dress_id"] is None and "dress deleted: T1 Test" in kept["notes"]
     assert c.get(f"/api/dresses/{spare}").status_code == 404
     assert not (PHOTOS / spare_photo).exists() and not (PHOTOS / spare_photo.replace(".webp", "_t.jpg")).exists()
 

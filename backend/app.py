@@ -385,10 +385,17 @@ def delete_photo(pid: int):
 
 @adm.delete("/dresses/{did}")
 def delete_dress(did: int):
-    """Delete a dress and its photo files. Refused once it has bookings: their history and revenue point at it."""
-    if one("SELECT 1 FROM bookings WHERE dress_id=? LIMIT 1", (did,)):
-        raise HTTPException(409, "This dress has bookings, so it can't be deleted. "
-                                 "Untick 'Show on website' to hide it instead.")
+    """Delete a dress and its photo files. Refused while it has real bookings (pending/confirmed/out/returned):
+    their history and revenue point at it. Cancelled/rejected bookings stay, with a note naming the dress."""
+    n = one(f"SELECT COUNT(*) AS n FROM bookings WHERE dress_id=? AND status IN {LIVE}", (did,))["n"]
+    if n:
+        raise HTTPException(409, f"This dress has {n} booking{'s' * (n != 1)} that are not cancelled "
+                                 "(see Payments). Cancel them first, or untick 'Show on website' to hide the dress.")
+    d = one("SELECT code, name FROM dresses WHERE id=?", (did,))
+    if not d:
+        raise HTTPException(404, "Dress not found")
+    run("UPDATE bookings SET dress_id=NULL, notes=trim(notes || ' [dress deleted: ' || ? || ']') WHERE dress_id=?",
+        (f"{d['code']} {d['name']}".strip(), did))
     for p in rows("SELECT id FROM dress_photos WHERE dress_id=?", (did,)):
         delete_photo(p["id"])
     run("DELETE FROM dresses WHERE id=?", (did,))
