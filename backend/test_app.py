@@ -10,7 +10,9 @@ import io  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from app import PHOTOS, app, with_preview  # noqa: E402
+import sqlite3  # noqa: E402
+
+from app import HERE, PHOTOS, app, migrate_categories, with_preview  # noqa: E402
 
 c = TestClient(app)
 DAY = (date.today() + timedelta(days=5)).isoformat()
@@ -58,7 +60,9 @@ def test_full_flow():
     c.patch(f"/api/admin/bookings/{b['id']}", headers=H, json={"status": "rejected"})
     assert c.get("/api/dresses", params={"date": DAY}).json()[0]["availability"] == "free"
     shop = c.post("/api/admin/bookings", headers=H,
-                  data={"dress_id": did, "date": DAY, "name": "Komal", "rent_paid_mode": "cash"}).json()
+                  data={"dress_id": did, "date": DAY, "name": "Komal", "rent_paid_mode": "cash",
+                        "rent": 650, "deposit": 1000}).json()  # negotiated down from 800 / 1500
+    assert (shop["rent_total"], shop["deposit_total"]) == (650, 1000)
     # re-approving the rejected one now conflicts
     assert c.patch(f"/api/admin/bookings/{b['id']}", headers=H, json={"status": "confirmed"}).status_code == 409
 
@@ -68,11 +72,31 @@ def test_full_flow():
         assert c.patch(f"/api/admin/bookings/{shop['id']}", headers=H, json=patch).status_code == 200
 
     grid = c.get("/api/admin/availability", headers=H, params={"from": DAY, "to": DAY}).json()["grid"]
-    assert grid[str(did)][DAY]["state"] == "shop"
+    assert grid[str(did)][DAY]["state"] == "shop" and grid[str(did)][DAY]["name"] == "Komal"
+    assert c.get("/api/admin/availability", headers=H, params={"from": DAY, "to": DAY}).json()["dresses"][0]["photo"]
 
     t = c.get("/api/admin/revenue", headers=H, params={"from": DAY, "to": DAY}).json()["totals"]
     assert (t["rent_cash"], t["rent_upi"], t["deposit_in"], t["deposit_out"], t["deductions"], t["deposit_held"]) \
-        == (800, 0, 1500, 1300, 200, 0)
+        == (650, 0, 1000, 800, 200, 0)
 
     st = c.get("/api/bookings/status", params={"code": b["code"], "phone": "9825012345"}).json()
     assert st["status"] == "rejected"
+
+
+def test_migrate_girls_boys_to_kids():
+    new = (HERE / "schema.sql").read_text()
+    old = new.replace("('women','men','kids','blouse')", "('women','girls','men','boys','kids')")
+    c = sqlite3.connect(":memory:")
+    c.executescript(old)
+    c.executescript("""INSERT INTO dresses (id, code, name, gender, rent) VALUES (1,'G1','Girl set','girls',400),
+                         (2,'W1','Women set','women',800), (3,'B1','Boy set','boys',300);
+                       INSERT INTO dress_photos (dress_id, path) VALUES (1, 'a.webp');
+                       INSERT INTO bookings (code, dress_id, name, phone, date, rent_total, deposit_total)
+                         VALUES ('SG-1', 1, 'X', '9', '2026-10-11', 400, 0);""")
+    migrate_categories(c, new)
+    c.executescript(new)  # what init_db runs next: must be a no-op now
+    assert c.execute("SELECT id, gender FROM dresses ORDER BY id").fetchall() == [(1, "kids"), (2, "women"), (3, "kids")]
+    assert c.execute("SELECT dress_id FROM dress_photos").fetchall() == [(1,)]
+    assert c.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert "'blouse'" in c.execute("SELECT sql FROM sqlite_master WHERE name='dresses'").fetchone()[0]
+    c.execute("INSERT INTO dresses (code, name, gender, rent) VALUES ('BL1', 'Blouse', 'blouse', 400)")

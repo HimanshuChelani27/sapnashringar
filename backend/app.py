@@ -35,7 +35,7 @@ SECRET = os.environ.get("GARBA_SECRET", "dev-secret-change-me").encode()
 
 LIVE = "('pending','confirmed','out','returned')"   # statuses that occupy a dress-night
 EARNED = "('confirmed','out','returned')"
-GENDERS = {"women", "girls", "men", "boys", "kids"}
+GENDERS = {"women", "men", "kids", "blouse"}
 ADDON_KINDS = {"jewellery", "pagdi", "umbrella", "dupatta", "other"}
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 PHOTO_PX = 1200  # longest side of the dress-page photo; 1600 = more zoom detail, ~2x the KB
@@ -69,8 +69,30 @@ def run(sql, args=()):
 def init_db():
     for d in (PHOTOS, PAYMENTS):
         d.mkdir(parents=True, exist_ok=True)
+    schema = (HERE / "schema.sql").read_text()
     with closing(db()) as c:
-        c.executescript((HERE / "schema.sql").read_text())
+        old = c.execute("SELECT sql FROM sqlite_master WHERE name='dresses'").fetchone()
+        if old and "'blouse'" not in old[0]:
+            migrate_categories(c, schema)
+        c.executescript(schema)
+
+
+def migrate_categories(c, schema):
+    """Sept 2026: girls/boys sections dropped (moved to kids), blouse added. SQLite can't alter a CHECK,
+    so rebuild the table the way the SQLite docs describe; ids stay the same, so photos/bookings keep pointing right."""
+    create = next(s for s in schema.split(";") if "TABLE IF NOT EXISTS dresses (" in s)
+    cols = "id, code, name, gender, type, size, description, rent, deposit, jewellery_available, jewellery_price, active"
+    c.executescript(f"""
+        PRAGMA foreign_keys=OFF;
+        BEGIN;
+        {create.replace("IF NOT EXISTS dresses (", "dresses_new (")};
+        INSERT INTO dresses_new ({cols})
+          SELECT {cols.replace("gender", "CASE WHEN gender IN ('girls','boys') THEN 'kids' ELSE gender END")} FROM dresses;
+        DROP TABLE dresses;
+        ALTER TABLE dresses_new RENAME TO dresses;
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+    """)
 
 
 init_db()
@@ -178,8 +200,9 @@ TAKEN = "Sorry, this dress was just booked for that date. Please pick another da
 
 
 def create_booking(*, dress_id, day, name, phone, with_jewellery, addon_ids, jewellery_pref, notes,
-                   screenshot, status, source, rent_paid_mode):
-    """Single path for online and shop bookings. Prices always come from the DB, never the client."""
+                   screenshot, status, source, rent_paid_mode, rent_override=None, deposit_override=None):
+    """Single path for online and shop bookings. Prices come from the DB; only the admin's shop booking
+    may override them (negotiated price)."""
     name = name.strip()[:80]
     if not name:
         raise HTTPException(400, "Please enter your name")
@@ -199,6 +222,8 @@ def create_booking(*, dress_id, day, name, phone, with_jewellery, addon_ids, jew
         raise HTTPException(400, "Pick a dress or at least one extra")
     rent += sum(a["price"] for a in addons)
     deposit += sum(a["deposit"] for a in addons)
+    rent = rent if rent_override is None else rent_override
+    deposit = deposit if deposit_override is None else deposit_override
     code = "SG-" + "".join(secrets.choice("ABCDEFGHJKMNPQRSTUVWXYZ23456789") for _ in range(5))
     try:
         with closing(db()) as c, c:
@@ -402,13 +427,16 @@ def admin_bookings(status: str = "", day: str = Query("", alias="date")):
 async def add_offline_booking(day: str = Form(..., alias="date"), name: str = Form(...), phone: str = Form(""),
                               dress_id: int | None = Form(None), with_jewellery: bool = Form(False),
                               addon_ids: str = Form(""), jewellery_pref: str = Form(""), notes: str = Form(""),
-                              rent_paid_mode: str = Form("cash")):
+                              rent_paid_mode: str = Form("cash"),
+                              rent: int | None = Form(None, ge=0), deposit: int | None = Form(None, ge=0)):
+    """Shop booking. rent/deposit are optional: blank = list price, a number = negotiated price."""
     if rent_paid_mode not in ("cash", "upi"):
         raise HTTPException(400, "Paid by cash or UPI?")
     return create_booking(dress_id=dress_id, day=parse_date(day), name=name,
                           phone=clean_phone(phone) if phone.strip() else "", with_jewellery=with_jewellery,
                           addon_ids=parse_ids(addon_ids), jewellery_pref=jewellery_pref, notes=notes,
-                          screenshot="", status="confirmed", source="offline", rent_paid_mode=rent_paid_mode)
+                          screenshot="", status="confirmed", source="offline", rent_paid_mode=rent_paid_mode,
+                          rent_override=rent, deposit_override=deposit)
 
 
 class BookingPatch(BaseModel):
@@ -459,16 +487,17 @@ def patch_booking(bid: int, p: BookingPatch):
 
 @adm.get("/availability")
 def availability(start: str = Query(..., alias="from"), end: str = Query(..., alias="to"), gender: str = ""):
-    sql, args = "SELECT id, code, name, gender, size, rent, jewellery_available, jewellery_price FROM dresses WHERE active=1", []
+    sql, args = f"""SELECT id, code, name, gender, type, size, rent, deposit, jewellery_available, jewellery_price,
+                    {FIRST_PHOTO.format('dresses.id')} AS photo FROM dresses WHERE active=1""", []
     if gender:
         sql += " AND gender=?"
         args.append(gender)
     grid = {}
-    for c in rows(f"""SELECT id, dress_id, date, status, source FROM bookings
+    for c in rows(f"""SELECT id, dress_id, date, status, source, name FROM bookings
                       WHERE date BETWEEN ? AND ? AND dress_id IS NOT NULL AND status IN {LIVE}""",
                   (parse_date(start), parse_date(end))):
         state = "hold" if c["status"] == "pending" else "online" if c["source"] == "online" else "shop"
-        grid.setdefault(c["dress_id"], {})[c["date"]] = {"state": state, "booking_id": c["id"]}
+        grid.setdefault(c["dress_id"], {})[c["date"]] = {"state": state, "booking_id": c["id"], "name": c["name"]}
     return {"dresses": rows(sql + " ORDER BY code, id", args), "grid": grid}
 
 

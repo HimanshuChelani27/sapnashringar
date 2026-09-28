@@ -85,9 +85,16 @@ function BookingCard({ b, reload }) {
         <Pill s={STATUS_TONE[b.status]}>{STATUS_LABEL[b.status]}</Pill>
       </div>
       <div className="row top">
-        {b.screenshot
-          ? <a href={payImg(b.screenshot)} target="_blank" rel="noreferrer" title="Open screenshot"><img className="shotthumb" src={payImg(b.screenshot)} alt="Payment screenshot" /></a>
-          : <Photo src={thumb(b.dress_photo)} className="shotthumb" />}
+        <div className="pics">
+          {b.dress_photo
+            ? <a href={img(b.dress_photo)} target="_blank" rel="noreferrer" title="Open dress photo"><Photo src={thumb(b.dress_photo)} className="shotthumb" alt={b.dress_name} /></a>
+            : <Photo className="shotthumb" />}
+          {b.screenshot && (
+            <a href={payImg(b.screenshot)} target="_blank" rel="noreferrer" className="paylink" title="Open payment screenshot">
+              <img className="payshot" src={payImg(b.screenshot)} alt="Payment screenshot" />Payment
+            </a>
+          )}
+        </div>
         <dl className="kv grow">
           <dt>Night</dt><dd>{fmtDate(b.date)}</dd>
           {b.dress_name && <><dt>Dress</dt><dd>{b.dress_code} {b.dress_name}</dd></>}
@@ -101,7 +108,7 @@ function BookingCard({ b, reload }) {
       {b.notes && <p className="note">“{b.notes}”</p>}
       {b.status === 'pending' && (
         <>
-          {b.screenshot && <span className="muted xs">Tap the screenshot to zoom. Match the amount and UTR in your bank app.</span>}
+          {b.screenshot && <span className="muted xs">Tap "Payment" to zoom. Match the amount and UTR in your bank app.</span>}
           <input className="input" placeholder="Note to customer (e.g. reason for rejecting)" value={note}
             onChange={e => setNote(e.target.value)} />
           <div className="row">
@@ -149,8 +156,8 @@ export function Day() {
   const [pick, setPick] = useState(null)
   const [list, err, reload] = useApi(`/admin/bookings?date=${date}&status=pending,confirmed,out,returned`)
   const [returns, , reloadR] = useApi(`/admin/bookings?date=${addDays(date, -1)}&status=out,returned`)
-  const [dresses, , reloadF] = useApi(`/dresses?date=${date}`)
-  const free = dresses?.filter(d => d.availability === 'free')
+  const [avail, , reloadF] = useApi(`/admin/availability?from=${date}&to=${date}`)
+  const free = avail?.dresses.filter(d => !avail.grid[d.id]?.[date])
   const reloadAll = () => { reload(); reloadR(); reloadF() }
   const shown = tab === 'customers' ? list : returns
   return (
@@ -164,17 +171,7 @@ export function Day() {
         value={tab} onChange={setTab} />
       {tab === 'returns' && <p className="muted xs">Dresses out from the night before ({fmtDate(addDays(date, -1))}).</p>}
       {tab === 'free' ? (
-        !free ? <Loading /> : (
-          <div className="card list">
-            {free.map(d => (
-              <div key={d.id} className="check">
-                <Photo src={thumb(d.photo)} className="mini" tone={(d.id % 6) + 1} />
-                <span className="grow"><b>{d.code}</b> {d.name}<br /><span className="muted xs">{cap(d.gender)} · {d.size} · {rupee(d.rent)}</span></span>
-                <button className="btn sm ghost" onClick={() => setPick({ dress: d, date })}>Book</button>
-              </div>
-            ))}
-          </div>
-        )
+        !avail ? <Loading /> : <DayPhotos data={avail} date={date} onlyFree onBook={setPick} />
       ) : !shown ? <Loading err={err} /> : !shown.length ? <p className="muted center">No one on this day.</p> :
         <div className="cards">{shown.map(b => <BookingCard key={b.id + b.status} b={b} reload={reloadAll} />)}</div>}
       {pick && <ShopBooking {...pick} onClose={() => setPick(null)} onSaved={() => { setPick(null); reloadAll() }} />}
@@ -185,12 +182,18 @@ export function Day() {
 // ---------- offline (shop) booking sheet ----------
 function ShopBooking({ dress, date, onClose, onSaved }) {
   const [f, setF] = useState({ name: '', phone: '', with_jewellery: false, rent_paid_mode: 'cash', notes: '' })
+  // null = list price; a typed number = the price agreed with the customer
+  const [rent, setRent] = useState(null)
+  const [dep, setDep] = useState(null)
   const [err, setErr] = useState('')
+  const listRent = dress.rent + (f.with_jewellery ? dress.jewellery_price : 0)
+  const changed = (rent !== null && Number(rent) !== listRent) || (dep !== null && Number(dep) !== dress.deposit)
+  const num = v => (v === null || v === '' ? undefined : Number(v))
   const set = k => e => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
   const save = async e => {
     e.preventDefault()
     try {
-      await api('/admin/bookings', { method: 'POST', admin: true, body: form({ ...f, dress_id: dress.id, date }) })
+      await api('/admin/bookings', { method: 'POST', admin: true, body: form({ ...f, dress_id: dress.id, date, rent: num(rent), deposit: num(dep) }) })
       onSaved()
     } catch (x) { setErr(x.message) }
   }
@@ -199,10 +202,20 @@ function ShopBooking({ dress, date, onClose, onSaved }) {
       <div className="scrim" onClick={onClose} />
       <form className="sheet" onSubmit={save}>
         <div className="grab" />
-        <b>{dress.code} {dress.name} · {fmtDate(date)} is free</b>
+        <div className="row">
+          <Photo src={thumb(dress.photo)} className="mini" tone={(dress.id % 6) + 1} />
+          <b className="grow">{dress.code} {dress.name} · {fmtDate(date)} is free</b>
+        </div>
         <input className="input" placeholder="Customer name" value={f.name} onChange={set('name')} required autoFocus />
         <input className="input" type="tel" inputMode="numeric" placeholder="Phone (optional)" value={f.phone} onChange={set('phone')} />
         {!!dress.jewellery_available && <label className="check"><input type="checkbox" checked={f.with_jewellery} onChange={set('with_jewellery')} /><span className="grow">With jewellery</span><span className="price">+{rupee(dress.jewellery_price)}</span></label>}
+        <div className="row">
+          <label className="field grow"><span className="lbl">Rent ₹</span>
+            <input className="input" type="number" min="0" inputMode="numeric" value={rent ?? listRent} onChange={e => setRent(e.target.value)} /></label>
+          <label className="field grow"><span className="lbl">Deposit ₹</span>
+            <input className="input" type="number" min="0" inputMode="numeric" value={dep ?? dress.deposit} onChange={e => setDep(e.target.value)} /></label>
+        </div>
+        {changed && <span className="muted xs">Special price. List price is {rupee(listRent)} rent · {rupee(dress.deposit)} deposit.</span>}
         <div className="seg">
           {['cash', 'upi'].map(m => <button type="button" key={m} className={f.rent_paid_mode === m ? 'on' : ''} onClick={() => setF({ ...f, rent_paid_mode: m })}>Rent paid by {m.toUpperCase()}</button>)}
         </div>
@@ -215,16 +228,76 @@ function ShopBooking({ dress, date, onClose, onSaved }) {
 }
 
 // ---------- availability grid ----------
+const CELL_LABEL = { hold: 'Payment to check', online: 'Booked online', shop: 'Booked in shop' }
+const VIEWS = [['day', 'One day · photos'], ['week', '2 weeks · grid']]
+
+/** Photo cards for one date: what is free (Book) and what is taken (by whom). */
+function DayPhotos({ data, date, onlyFree, onBook }) {
+  const nav = useNavigate()
+  const cell = d => data.grid[d.id]?.[date]
+  const free = data.dresses.filter(d => !cell(d)).length
+  const list = data.dresses.filter(d => !onlyFree || !cell(d)).sort((a, b) => !!cell(a) - !!cell(b))
+  return (
+    <>
+      <p className="xs"><b className="ok">{free} free</b> <span className="muted">· {data.dresses.length - free} booked</span></p>
+      {!list.length ? <p className="muted center">{onlyFree ? 'Nothing free on this day.' : 'No dresses in this category yet.'}</p> : (
+        <div className="grid2">
+          {list.map(d => {
+            const c = cell(d)
+            return (
+              <div key={d.id} className={'dcard' + (c ? ' taken' : '')}>
+                {d.photo
+                  ? <a href={img(d.photo)} target="_blank" rel="noreferrer" title="Open full photo"><Photo src={thumb(d.photo)} alt={d.name} /></a>
+                  : <Photo tone={(d.id % 6) + 1} alt={d.name} />}
+                <div className="in">
+                  <span className="nm"><b>{d.code}</b> {d.name}</span>
+                  <span className="muted xs">{[cap(d.gender), d.size, rupee(d.rent)].filter(Boolean).join(' · ')}</span>
+                  {c
+                    ? <button className="who" onClick={() => nav('/admin/day', { state: { date } })} title="Open day sheet">
+                        <Pill s={c.state === 'hold' ? 'hold' : 'booked'}>{CELL_LABEL[c.state]}</Pill><span>{c.name}</span>
+                      </button>
+                    : <button className="btn sm" onClick={() => onBook({ dress: d, date })}>Book</button>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
+}
+
 export function Grid() {
   const nav = useNavigate()
+  const [view, setView] = useState('day')
+  const [date, setDate] = useState(today())
   const [from, setFrom] = useState(today())
   const [gender, setGender] = useState('')
   const [pick, setPick] = useState(null)
   const days = Array.from({ length: 14 }, (_, i) => addDays(from, i))
-  const [data, err, reload] = useApi(`/admin/availability?from=${from}&to=${days[13]}&gender=${gender}`)
+  const [dayData, dayErr, reloadDay] = useApi(view === 'day' ? `/admin/availability?from=${date}&to=${date}&gender=${gender}` : null)
+  const [data, err, reload] = useApi(view === 'week' ? `/admin/availability?from=${from}&to=${days[13]}&gender=${gender}` : null)
   const LETTER = { hold: 'P', online: 'O', shop: 'S' }
+  const saved = () => { setPick(null); view === 'day' ? reloadDay() : reload() }
+  const bookSheet = pick && <ShopBooking {...pick} onClose={() => setPick(null)} onSaved={saved} />
+  if (view === 'day') {
+    return (
+      <main className="body">
+        <Chips options={VIEWS} value={view} onChange={setView} />
+        <div className="row between">
+          <h1 className="h sm">{fmtDate(date, 'en', { weekday: 'long', day: 'numeric', month: 'short' })}</h1>
+          <input className="input tiny wide" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} aria-label="Pick date" />
+        </div>
+        <DateStrip value={date} onChange={setDate} from={addDays(today(), -3)} days={30} />
+        <Chips options={GENDER_CHIPS} value={gender} onChange={setGender} />
+        {!dayData ? <Loading err={dayErr} /> : <DayPhotos data={dayData} date={date} onBook={setPick} />}
+        {bookSheet}
+      </main>
+    )
+  }
   return (
     <main className="body">
+      <Chips options={VIEWS} value={view} onChange={setView} />
       <div className="row between">
         <button className="chip" onClick={() => setFrom(addDays(from, -7))}>‹ Week</button>
         <input className="input tiny wide" type="date" value={from} onChange={e => e.target.value && setFrom(e.target.value)} aria-label="Start date" />
@@ -238,7 +311,7 @@ export function Grid() {
             <tbody>
               {data.dresses.map(dr => (
                 <tr key={dr.id}>
-                  <td className="n">{dr.code} {dr.name.slice(0, 14)}</td>
+                  <td className="n"><span className="nrow"><Photo src={thumb(dr.photo)} className="micro" tone={(dr.id % 6) + 1} alt="" /><span><b>{dr.code}</b><br />{dr.name.slice(0, 12)}</span></span></td>
                   {days.map(d => {
                     const c = data.grid[dr.id]?.[d]
                     return c
@@ -255,7 +328,7 @@ export function Grid() {
         <span><i className="free" />Free (tap to book)</span><span><i className="hold solid" />P Payment to check</span>
         <span><i className="online" />O Online</span><span><i className="shop" />S Shop</span>
       </div>
-      {pick && <ShopBooking {...pick} onClose={() => setPick(null)} onSaved={() => { setPick(null); reload() }} />}
+      {bookSheet}
     </main>
   )
 }

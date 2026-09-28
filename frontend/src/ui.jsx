@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import T from './i18n'
 import { addDays, api, fmtDate, nightNo, today } from './api'
 
-export const GENDERS = ['women', 'girls', 'men', 'boys', 'kids']
+export const GENDERS = ['women', 'men', 'kids', 'blouse']
 
 const Ctx = createContext({ lang: 'en', setLang() {}, settings: {}, reloadSettings() {} })
 export const useApp = () => useContext(Ctx)

@@ -43,7 +43,12 @@ export function Home() {
   const start = settings.navratri_start > today() ? settings.navratri_start : today()
   const [date, setDate] = useState(start)
   useEffect(() => setDate(start), [start])
-  const tiles = [...GENDERS.map((g, i) => [`/dresses?gender=${g}`, t('g_' + g), i + 1]), ['/extras', t('extras'), 6]]
+  // category tiles show a real photo from that category (falls back to the pattern until photos exist)
+  const [dresses] = useApi('/dresses')
+  const [extras] = useApi('/addons')
+  const pic = list => list?.find(x => x.photo)?.photo
+  const tiles = [...GENDERS.map((g, i) => [`/dresses?gender=${g}`, t('g_' + g), i + 1, pic(dresses?.filter(d => d.gender === g))]),
+    ['/extras', t('extras'), 6, pic(extras)]]
   return (
     <>
       <TopBar />
@@ -57,8 +62,8 @@ export function Home() {
         </section>
         <h2 className="lbl">{t('shop_by')}</h2>
         <div className="cats">
-          {tiles.map(([to, label, tone]) => (
-            <Link key={to} to={to}><Photo tone={tone} alt="" />{label}</Link>
+          {tiles.map(([to, label, tone, photo]) => (
+            <Link key={to} to={to}><Photo src={thumb(photo)} tone={tone} alt="" />{label}</Link>
           ))}
         </div>
         <h2 className="lbl">{t('how')}</h2>

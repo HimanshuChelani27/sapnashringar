@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS dresses (
   id INTEGER PRIMARY KEY,
   code TEXT NOT NULL DEFAULT '',
   name TEXT NOT NULL,
-  gender TEXT NOT NULL CHECK (gender IN ('women','girls','men','boys','kids')),
+  gender TEXT NOT NULL CHECK (gender IN ('women','men','kids','blouse')),
   type TEXT NOT NULL DEFAULT '',
   size TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',

@@ -24,6 +24,14 @@ npm run dev          # open http://localhost:5173/garba/home
 - On first use, go to **Admin → Settings** and fill in the UPI ID, the QR image, the WhatsApp number, the Navratri first night, and the rules.
 - Tests: `.venv/Scripts/pip install pytest httpx && .venv/Scripts/python -m pytest`
 
+## Uploading the catalog in one go
+
+1. Fill in `Sapna-Catalog.xlsx`, and put the photos in `sapna-photos/` named `CODE (1).jpg`, `CODE (2).jpg` and so on. The UPI QR goes in as `upi-qr.jpg`.
+2. Check the file: `backend\.venv\Scripts\python tools\import_catalog.py --check`
+3. Upload: `backend\.venv\Scripts\python tools\import_catalog.py`. It asks for the admin password.
+
+It is safe to run again: existing codes are updated, not duplicated. It needs `pip install openpyxl httpx` in that venv.
+
 ## Deploy on Railway (current)
 
 1. Railway → New project → Deploy from GitHub repo → pick this repo. Railway builds it with the `Dockerfile`.
