@@ -10,9 +10,10 @@ const store = {
 
 function useQuery() {
   const [sp, setSp] = useSearchParams()
+  // set('date', d) or set({ gender: g, type: '' }) to change several at once
   const set = (k, v) => {
     const n = new URLSearchParams(sp)
-    v ? n.set(k, v) : n.delete(k)
+    for (const [key, val] of Object.entries(typeof k === 'string' ? { [k]: v } : k)) val ? n.set(key, val) : n.delete(key)
     setSp(n, { replace: true })
   }
   return [k => sp.get(k) || '', set]
@@ -118,15 +119,21 @@ export function Dresses() {
   const list = all?.filter(d => (!f.gender || d.gender === f.gender) && (!f.type || d.type === f.type) &&
     (!f.size || d.size === f.size) && (!f.price || (d.rent >= PRICES[f.price][0] && d.rent <= PRICES[f.price][1])))
   const uniq = k => [...new Set((all || []).map(d => d[k]).filter(Boolean))].sort().map(v => [v, v])
+  const typesIn = g => [...new Set((all || []).filter(d => d.gender === g).map(d => d.type).filter(Boolean))].sort()
   const active = Object.values(f).filter(Boolean).length
-  const clear = () => ['gender', 'type', 'size', 'price'].forEach(k => set(k, ''))
+  const clear = () => set({ gender: '', type: '', size: '', price: '' })
   return (
     <>
       <TopBar title={t('nav_dresses')}>
         <button className={'chip' + (active ? ' on' : '')} onClick={() => setOpen(true)}>{t('filter')}{active ? ` · ${active}` : ''}</button>
       </TopBar>
       <main className="body">
-        <Chips options={[['', t('g_all')], ...GENDERS.map(g => [g, t('g_' + g)])]} value={f.gender} onChange={v => set('gender', v)} />
+        <Chips options={[['', t('g_all')], ...GENDERS.map(g => [g, t('g_' + g)])]} value={f.gender}
+          onChange={v => set({ gender: v, type: '' })} />
+        {/* inside a section, one tap between its types, e.g. Blouse / Kurti */}
+        {f.gender && typesIn(f.gender).length > 1 && (
+          <Chips options={[['', t('g_all')], ...typesIn(f.gender).map(v => [v, v])]} value={f.type} onChange={v => set('type', v)} />
+        )}
         {!list ? <Loading err={err} /> : !list.length ? <p className="muted center">{t('none_found')}</p> : (
           <div className="grid2">{list.map(d => <DressCard key={d.id} d={d} />)}</div>
         )}

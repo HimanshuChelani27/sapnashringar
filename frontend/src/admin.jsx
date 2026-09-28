@@ -3,7 +3,7 @@ import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useParams } 
 import { addDays, api, fmtDate, form, getToken, img, payImg, rupee, setToken, thumb, today, waLink } from './api'
 import { Chips, DateStrip, GENDERS, Loading, Photo, Pill, useApi, useApp } from './ui'
 
-const cap = s => s[0].toUpperCase() + s.slice(1)
+const cap = s => (s === 'blouse' ? 'Blouse & Kurti' : s[0].toUpperCase() + s.slice(1))
 const GENDER_CHIPS = [['', 'All'], ...GENDERS.map(g => [g, cap(g)])]
 const STATUS_TONE = { pending: 'hold', confirmed: 'free', out: 'free', returned: 'free', rejected: 'booked', cancelled: 'booked' }
 const STATUS_LABEL = { pending: 'Payment to check', confirmed: 'Confirmed', out: 'Handed over', returned: 'Returned', rejected: 'Rejected', cancelled: 'Cancelled' }
