@@ -48,6 +48,8 @@ export function Home() {
   const [dresses] = useApi('/dresses')
   const [extras] = useApi('/addons')
   const pic = list => list?.find(x => x.photo)?.photo
+  const popular = dresses?.filter(d => d.photo).slice(0, 10)
+  const minRent = dresses?.length && Math.min(...dresses.map(d => d.rent))
   const tiles = [...GENDERS.map((g, i) => [`/dresses?gender=${g}`, t('g_' + g), i + 1, pic(dresses?.filter(d => d.gender === g))]),
     ['/extras', t('extras'), 6, pic(extras)]]
   return (
@@ -55,12 +57,18 @@ export function Home() {
       <TopBar />
       <main className="body">
         <section className="hero">
-          <p className="h">{t('which_night')}</p>
+          <h1 className="h">{t('hero_h')}</h1>
+          <p className="sub">{t('hero_sub')}{minRent ? ` · ${t('from_price', { p: rupee(minRent) })}` : ''}</p>
+          <p className="q">{t('which_night')}</p>
           <DateStrip value={date} onChange={setDate} from={start} days={12} light />
           <button className="btn gold" onClick={() => nav(`/availability?date=${date}`)}>
             {t('see_free')} · {fmtDate(date, lang)}
           </button>
         </section>
+        {popular?.length > 0 && <>
+          <div className="row between"><h2 className="lbl">{t('popular')}</h2><Link to="/dresses" className="link xs">{t('see_all')} ›</Link></div>
+          <div className="strip">{popular.map(d => <DressCard key={d.id} d={d} />)}</div>
+        </>}
         <h2 className="lbl">{t('shop_by')}</h2>
         <div className="cats">
           {tiles.map(([to, label, tone, photo]) => (
@@ -71,6 +79,14 @@ export function Home() {
         <ol className="steps">
           <li>{t('how1')}</li><li>{t('how2')}</li><li>{t('how3')}</li>
         </ol>
+        {settings.shop_address && (
+          <section className="card col">
+            <h2 className="lbl">{t('visit')}</h2>
+            <p className="pre">{settings.shop_address}</p>
+            <a className="btn ghost sm" target="_blank" rel="noreferrer"
+              href={'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(settings.shop_address)}>{t('directions')}</a>
+          </section>
+        )}
         <Link to="/rules" className="link">{t('rules')} ›</Link>
       </main>
     </>
@@ -492,6 +508,14 @@ export function Status() {
             {b.admin_note && <p className="note">{b.admin_note}</p>}
             {['confirmed', 'out'].includes(b.status) && settings.pickup_rules && <p className="note pre">{settings.pickup_rules}</p>}
           </div>
+        )}
+        {settings.shop_address && (
+          <section className="card col">
+            <h2 className="lbl">{t('visit')}</h2>
+            <p className="pre">{settings.shop_address}</p>
+            <a className="btn ghost sm" target="_blank" rel="noreferrer"
+              href={'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(settings.shop_address)}>{t('directions')}</a>
+          </section>
         )}
         <Link to="/rules" className="link">{t('rules')} ›</Link>
       </main>

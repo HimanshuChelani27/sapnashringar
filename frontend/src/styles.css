@@ -150,6 +150,12 @@ textarea.input { resize: vertical; }
 .hero::before { content: ""; position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(circle, rgba(255,220,120,.35) 1.4px, transparent 2px) 0 0/12px 12px; }
 .hero > * { position: relative; }
+.hero .h { font-size: 27px; }
+.hero .sub { font-size: 14px; color: #FFE3EF; margin-top: -6px; }
+.hero .q { font-weight: 700; font-size: 15px; margin-top: 4px; }
+.strip { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; scroll-snap-type: x proximity; }
+.strip::-webkit-scrollbar { display: none; }
+.strip .dcard { flex: none; width: 140px; scroll-snap-align: start; }
 .cats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .cats a { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; text-align: center; }
 .cats .ph { aspect-ratio: 4/3; }

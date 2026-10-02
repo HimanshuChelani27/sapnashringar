@@ -1,7 +1,12 @@
 // Customer-facing text. Admin pages stay English.
 export default {
   en: {
-    tagline: 'Navratri dresses on rent',
+    tagline: 'Garba dresses on rent · Nagpur',
+    hero_h: 'Garba dresses on rent in Nagpur',
+    hero_sub: 'Chaniya choli, kediyu, kurti & jewellery for women, men and kids',
+    from_price: 'from {p}/night',
+    popular: 'Popular dresses', see_all: 'See all',
+    visit: 'Visit our shop', directions: 'Get directions',
     nav_home: 'Home', nav_date: 'By date', nav_dresses: 'Dresses', nav_booking: 'My booking',
     wa_us: 'WhatsApp us',
     which_night: 'Which night are you dancing?',
@@ -63,7 +68,12 @@ export default {
     share: 'Share',
   },
   hi: {
-    tagline: 'नवरात्रि ड्रेस किराये पर',
+    tagline: 'गरबा ड्रेस किराये पर · नागपुर',
+    hero_h: 'नागपुर में गरबा ड्रेस किराये पर',
+    hero_sub: 'महिलाओं, पुरुषों और बच्चों के लिए चनिया चोली, केडियू, कुर्ती और ज्वेलरी',
+    from_price: '{p}/रात से शुरू',
+    popular: 'लोकप्रिय ड्रेस', see_all: 'सभी देखें',
+    visit: 'हमारी दुकान पर आएँ', directions: 'रास्ता देखें',
     nav_home: 'होम', nav_date: 'तारीख से', nav_dresses: 'ड्रेस', nav_booking: 'मेरी बुकिंग',
     wa_us: 'WhatsApp करें',
     which_night: 'आप किस रात गरबा खेलने जा रहे हैं?',

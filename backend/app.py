@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import html
 import io
+import json
 import os
 import re
 import secrets
@@ -572,6 +573,23 @@ def root():
     return RedirectResponse("/garba/home")
 
 
+SITE = "https://www.sapnashringar.com"  # the bare domain is a GoDaddy forward, so www is the one Google should index
+
+
+@app.get("/robots.txt")
+def robots():
+    return Response(f"User-agent: *\nDisallow: /garba/admin\nDisallow: /api/\nSitemap: {SITE}/sitemap.xml\n",
+                    media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap():
+    paths = ["home", "dresses", "availability"] + [f"dresses/{d['id']}" for d in rows("SELECT id FROM dresses WHERE active=1")]
+    urls = "".join(f"<url><loc>{SITE}/garba/{p}</loc></url>" for p in paths)
+    return Response(f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
+                    media_type="application/xml")
+
+
 if DIST.exists():
     @app.get("/garba")
     @app.get("/garba/{rest:path}")
@@ -584,16 +602,35 @@ if DIST.exists():
 
 def with_preview(page, rest, base):
     """WhatsApp/Facebook don't run JS, so put the link-preview tags into the HTML on the server."""
-    title, desc, image = "Sapna Garba · Navratri dresses on rent",         "Chaniya choli, kediyu and jewellery on rent for Navratri. Check free dates and book online.", ""
+    title = "Garba Dress on Rent in Nagpur · Chaniya Choli Rental | Sapna Garba"
+    desc = ("Garba and Navratri dresses on rent in Nagpur: chaniya choli, kediyu, kurti and jewellery for women, "
+            "men and kids. Check free dates and book online.")
+    image = ""
     m = re.fullmatch(r"dresses/(\d+)", rest)
     d = m and one(f"SELECT d.*, {FIRST_PHOTO.format('d.id')} AS photo FROM dresses d WHERE id=? AND active=1",
                   (int(m[1]),))
     if d:
-        title = f"{d['name']} · ₹{d['rent']}/night | Sapna Garba"
+        title = f"{d['name']} on Rent in Nagpur · ₹{d['rent']}/night | Sapna Garba"
         desc = (d["description"] or desc)[:200]
         image = d["photo"] and f"{base}uploads/{thumb_of(d['photo'])}"
     tags = [("og:title", title), ("og:description", desc), ("og:type", "website"), ("og:site_name", "Sapna Garba")]
     if image:
         tags.append(("og:image", image))
     meta = "".join(f'<meta property="{k}" content="{html.escape(v)}">' for k, v in tags)
-    return page.replace("</head>", f'{meta}<meta name="description" content="{html.escape(desc)}"></head>', 1)
+    shop = {"@context": "https://schema.org", "@type": "ClothingStore", "name": "Sapna Garba", "url": f"{SITE}/garba/home",
+            "description": desc, "address": {"@type": "PostalAddress", "addressLocality": "Nagpur",
+                                             "addressRegion": "Maharashtra", "addressCountry": "IN"}}
+    phone = one("SELECT value FROM settings WHERE key='whatsapp_number'")
+    if phone:
+        shop["telephone"] = "+91" + phone["value"][-10:]
+    ld = json.dumps(shop).replace("</", r"<\/")
+    head = (f'{meta}<meta name="description" content="{html.escape(desc)}">'
+            f'<link rel="canonical" href="{SITE}/garba/{html.escape(rest or "home")}">'
+            f'<script type="application/ld+json">{ld}</script>')
+    page = re.sub(r"<title>.*?</title>", f"<title>{html.escape(title)}</title>", page, count=1)
+    # Google reads this text; React replaces it as soon as the page loads
+    links = "".join(f'<li><a href="/garba/dresses/{d["id"]}">{html.escape(d["name"])} on rent, ₹{d["rent"]}</a></li>'
+                    for d in rows("SELECT id, name, rent FROM dresses WHERE active=1 ORDER BY id"))
+    body = (f"<h1>{html.escape(title.split(' | ')[0])}</h1><p>{html.escape(desc)}</p><ul>{links}</ul>")
+    return (page.replace("</head>", head + "</head>", 1)
+                .replace('<div id="root"></div>', f'<div id="root">{body}</div>', 1))

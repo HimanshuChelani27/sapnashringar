@@ -39,6 +39,9 @@ def test_full_flow():
     assert "immutable" in r.headers["cache-control"]
     page = with_preview("<head></head>", f"dresses/{did}", "https://x.in/")
     assert 'og:title" content="Rani pink' in page and "_t.jpg" in page
+    home = with_preview('<title>x</title></head><div id="root"></div>', "home", "https://x.in/")
+    assert "Nagpur" in home and 'rel="canonical"' in home and f'href="/garba/dresses/{did}"' in home
+    assert f"/garba/dresses/{did}<" in c.get("/sitemap.xml").text and "Disallow: /garba/admin" in c.get("/robots.txt").text
 
     pagdi = c.post("/api/admin/addons", headers=H, data={"name": "Pagdi", "kind": "pagdi", "price": 150}).json()["id"]
 
