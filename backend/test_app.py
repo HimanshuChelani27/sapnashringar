@@ -41,6 +41,7 @@ def test_full_flow():
     assert 'og:title" content="Rani pink' in page and "_t.jpg" in page
     home = with_preview('<title>x</title></head><div id="root"></div>', "home", "https://x.in/")
     assert "Nagpur" in home and 'rel="canonical"' in home and f'href="/garba/dresses/{did}"' in home
+    assert c.head("/sitemap.xml").status_code == 200
     assert f"/garba/dresses/{did}<" in c.get("/sitemap.xml").text and "Disallow: /garba/admin" in c.get("/robots.txt").text
 
     pagdi = c.post("/api/admin/addons", headers=H, data={"name": "Pagdi", "kind": "pagdi", "price": 150}).json()["id"]
@@ -51,7 +52,7 @@ def test_full_flow():
         "with_jewellery": True, "addon_ids": str(pagdi), "rent_total": 1})
     assert r.status_code == 200, r.text
     b = r.json()
-    assert (b["rent_total"], b["deposit_total"]) == (1250, 1500)
+    assert (b["rent_total"], b["deposit_total"], b["advance"]) == (1250, 1500, 200)  # default advance
 
     # pending holds the night
     assert c.get("/api/dresses", params={"date": DAY}).json()[0]["availability"] == "hold"
@@ -64,7 +65,7 @@ def test_full_flow():
     assert c.get("/api/dresses", params={"date": DAY}).json()[0]["availability"] == "free"
     shop = c.post("/api/admin/bookings", headers=H,
                   data={"dress_id": did, "date": DAY, "name": "Komal", "rent_paid_mode": "cash",
-                        "rent": 650, "deposit": 1000}).json()  # negotiated down from 800 / 1500
+                        "rent": 650, "deposit": 1000, "advance": 100}).json()  # negotiated from 800 / 1500
     assert (shop["rent_total"], shop["deposit_total"]) == (650, 1000)
     # re-approving the rejected one now conflicts
     assert c.patch(f"/api/admin/bookings/{b['id']}", headers=H, json={"status": "confirmed"}).status_code == 409
@@ -79,8 +80,8 @@ def test_full_flow():
     assert c.get("/api/admin/availability", headers=H, params={"from": DAY, "to": DAY}).json()["dresses"][0]["photo"]
 
     t = c.get("/api/admin/revenue", headers=H, params={"from": DAY, "to": DAY}).json()["totals"]
-    assert (t["rent_cash"], t["rent_upi"], t["deposit_in"], t["deposit_out"], t["deductions"], t["deposit_held"]) \
-        == (650, 0, 1000, 800, 200, 0)
+    assert (t["rent"], t["advance"], t["balance"], t["deposit_in"], t["deposit_out"], t["deductions"],
+            t["deposit_held"]) == (650, 100, 550, 1000, 800, 200, 0)
 
     st = c.get("/api/bookings/status", params={"code": b["code"], "phone": "9825012345"}).json()
     assert st["status"] == "rejected"

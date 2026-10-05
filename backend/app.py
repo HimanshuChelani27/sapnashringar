@@ -41,7 +41,9 @@ ADDON_KINDS = {"jewellery", "pagdi", "umbrella", "dupatta", "other"}
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 PHOTO_PX = 1200  # longest side of the dress-page photo; 1600 = more zoom detail, ~2x the KB
 MAX_IMG = 25 * 1024 * 1024  # raw iPhone photos; we shrink them on save
-SETTING_KEYS = ("upi_id", "whatsapp_number", "shop_address", "pickup_rules", "upi_qr", "navratri_start")
+SETTING_KEYS = ("upi_id", "whatsapp_number", "shop_address", "pickup_rules", "upi_qr", "navratri_start",
+                "advance_amount")
+DEFAULT_ADVANCE = 200
 
 
 # ---------- db ----------
@@ -76,6 +78,11 @@ def init_db():
         if old and "'blouse'" not in old[0]:
             migrate_categories(c, schema)
         c.executescript(schema)
+        if "advance" not in [r[1] for r in c.execute("PRAGMA table_info(bookings)")]:
+            # Oct 2026: online bookings now pay an advance only. Older online ones paid the full rent by UPI.
+            with c:
+                c.execute("ALTER TABLE bookings ADD COLUMN advance INTEGER NOT NULL DEFAULT 0")
+                c.execute("UPDATE bookings SET advance = rent_total WHERE source = 'online'")
 
 
 def migrate_categories(c, schema):
@@ -201,7 +208,8 @@ TAKEN = "Sorry, this dress was just booked for that date. Please pick another da
 
 
 def create_booking(*, dress_id, day, name, phone, with_jewellery, addon_ids, jewellery_pref, notes,
-                   screenshot, status, source, rent_paid_mode, rent_override=None, deposit_override=None):
+                   screenshot, status, source, rent_paid_mode, rent_override=None, deposit_override=None,
+                   advance=None):
     """Single path for online and shop bookings. Prices come from the DB; only the admin's shop booking
     may override them (negotiated price)."""
     name = name.strip()[:80]
@@ -225,22 +233,28 @@ def create_booking(*, dress_id, day, name, phone, with_jewellery, addon_ids, jew
     deposit += sum(a["deposit"] for a in addons)
     rent = rent if rent_override is None else rent_override
     deposit = deposit if deposit_override is None else deposit_override
+    advance = min(advance_amount() if advance is None else advance, rent)
     code = "SG-" + "".join(secrets.choice("ABCDEFGHJKMNPQRSTUVWXYZ23456789") for _ in range(5))
     try:
         with closing(db()) as c, c:
             bid = c.execute(
                 """INSERT INTO bookings (code, dress_id, name, phone, date, with_jewellery, jewellery_pref, notes,
-                   rent_total, deposit_total, rent_paid_mode, screenshot, status, source)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   rent_total, deposit_total, advance, rent_paid_mode, screenshot, status, source)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (code, dress_id, name, phone, day, int(with_jewellery), jewellery_pref[:200], notes[:500],
-                 rent, deposit, rent_paid_mode, screenshot, status, source)).lastrowid
+                 rent, deposit, advance, rent_paid_mode, screenshot, status, source)).lastrowid
             c.executemany("INSERT INTO booking_addons VALUES (?,?,?,?)",
                           [(bid, a["id"], a["price"], a["deposit"]) for a in addons])
     except sqlite3.IntegrityError:
         if screenshot:
             (PAYMENTS / screenshot).unlink(missing_ok=True)
         raise HTTPException(409, TAKEN)
-    return {"id": bid, "code": code, "rent_total": rent, "deposit_total": deposit}
+    return {"id": bid, "code": code, "rent_total": rent, "deposit_total": deposit, "advance": advance}
+
+
+def advance_amount():
+    v = (one("SELECT value FROM settings WHERE key='advance_amount'") or {}).get("value", "")
+    return int(v) if v.strip().isdigit() else DEFAULT_ADVANCE
 
 
 # ---------- public ----------
@@ -308,7 +322,7 @@ def booking_status(code: str, phone: str):
     if not b:
         raise HTTPException(404, "No booking found. Check the code and phone number.")
     keep = ("code", "date", "status", "dress_name", "dress_photo", "addons", "with_jewellery",
-            "jewellery_pref", "rent_total", "deposit_total", "admin_note")
+            "jewellery_pref", "rent_total", "deposit_total", "advance", "admin_note")
     return {k: b[k] for k in keep}
 
 
@@ -448,15 +462,17 @@ async def add_offline_booking(day: str = Form(..., alias="date"), name: str = Fo
                               dress_id: int | None = Form(None), with_jewellery: bool = Form(False),
                               addon_ids: str = Form(""), jewellery_pref: str = Form(""), notes: str = Form(""),
                               rent_paid_mode: str = Form("cash"),
-                              rent: int | None = Form(None, ge=0), deposit: int | None = Form(None, ge=0)):
-    """Shop booking. rent/deposit are optional: blank = list price, a number = negotiated price."""
+                              rent: int | None = Form(None, ge=0), deposit: int | None = Form(None, ge=0),
+                              advance: int = Form(0, ge=0)):
+    """Shop booking. rent/deposit are optional: blank = list price, a number = negotiated price.
+    advance = whatever the customer paid now (often 0: they pay everything at pickup)."""
     if rent_paid_mode not in ("cash", "upi"):
         raise HTTPException(400, "Paid by cash or UPI?")
     return create_booking(dress_id=dress_id, day=parse_date(day), name=name,
                           phone=clean_phone(phone) if phone.strip() else "", with_jewellery=with_jewellery,
                           addon_ids=parse_ids(addon_ids), jewellery_pref=jewellery_pref, notes=notes,
                           screenshot="", status="confirmed", source="offline", rent_paid_mode=rent_paid_mode,
-                          rent_override=rent, deposit_override=deposit)
+                          rent_override=rent, deposit_override=deposit, advance=advance)
 
 
 class BookingPatch(BaseModel):
@@ -521,7 +537,7 @@ def availability(start: str = Query(..., alias="from"), end: str = Query(..., al
     return {"dresses": rows(sql + " ORDER BY code, id", args), "grid": grid}
 
 
-REVENUE_COLS = ("date", "bookings", "rent_upi", "rent_cash", "deposit_in", "deposit_out", "deductions")
+REVENUE_COLS = ("date", "bookings", "rent", "advance", "balance", "deposit_in", "deposit_out", "deductions")
 
 
 @adm.get("/revenue")
@@ -529,15 +545,15 @@ def revenue(start: str = Query(..., alias="from"), end: str = Query(..., alias="
     # ponytail: grouped by booking date, not the moment cash changed hands; add a payments ledger if that matters.
     days = rows(f"""SELECT date,
         COUNT(CASE WHEN status IN {EARNED} THEN 1 END) AS bookings,
-        SUM(CASE WHEN status IN {EARNED} AND rent_paid_mode='upi' THEN rent_total ELSE 0 END) AS rent_upi,
-        SUM(CASE WHEN status IN {EARNED} AND rent_paid_mode='cash' THEN rent_total ELSE 0 END) AS rent_cash,
+        SUM(CASE WHEN status IN {EARNED} THEN rent_total ELSE 0 END) AS rent,
+        SUM(CASE WHEN status IN {EARNED} THEN advance ELSE 0 END) AS advance,
+        SUM(CASE WHEN status IN {EARNED} THEN rent_total - advance ELSE 0 END) AS balance,
         SUM(CASE WHEN deposit_collected_at IS NOT NULL THEN deposit_total ELSE 0 END) AS deposit_in,
         SUM(CASE WHEN deposit_refunded THEN deposit_total - deduction ELSE 0 END) AS deposit_out,
         SUM(CASE WHEN deposit_refunded THEN deduction ELSE 0 END) AS deductions
         FROM bookings WHERE date BETWEEN ? AND ? GROUP BY date ORDER BY date""",
                 (parse_date(start), parse_date(end)))
     totals = {k: sum(d[k] for d in days) for k in REVENUE_COLS[1:]}
-    totals["rent"] = totals["rent_upi"] + totals["rent_cash"]
     totals["deposit_held"] = totals["deposit_in"] - totals["deposit_out"] - totals["deductions"]
     if format == "csv":
         buf = io.StringIO()
@@ -576,13 +592,13 @@ def root():
 SITE = "https://www.sapnashringar.com"  # the bare domain is a GoDaddy forward, so www is the one Google should index
 
 
-@app.get("/robots.txt")
+@app.api_route("/robots.txt", methods=["GET", "HEAD"])
 def robots():
     return Response(f"User-agent: *\nDisallow: /garba/admin\nDisallow: /api/\nSitemap: {SITE}/sitemap.xml\n",
                     media_type="text/plain")
 
 
-@app.get("/sitemap.xml")
+@app.api_route("/sitemap.xml", methods=["GET", "HEAD"])
 def sitemap():
     paths = ["home", "dresses", "availability"] + [f"dresses/{d['id']}" for d in rows("SELECT id FROM dresses WHERE active=1")]
     urls = "".join(f"<url><loc>{SITE}/garba/{p}</loc></url>" for p in paths)
@@ -591,8 +607,8 @@ def sitemap():
 
 
 if DIST.exists():
-    @app.get("/garba")
-    @app.get("/garba/{rest:path}")
+    @app.api_route("/garba", methods=["GET", "HEAD"])
+    @app.api_route("/garba/{rest:path}", methods=["GET", "HEAD"])
     def spa(request: Request, rest: str = ""):
         f = (DIST / rest).resolve()
         if rest and f.is_file() and DIST.resolve() in f.parents:

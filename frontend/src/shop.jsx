@@ -287,6 +287,7 @@ export function Book() {
   const chosen = priced.filter(a => picked.includes(a.id))
   const rent = (dress?.rent || 0) + (withJ ? dress.jewellery_price : 0) + chosen.reduce((s, a) => s + a.price, 0)
   const deposit = (dress?.deposit || 0) + chosen.reduce((s, a) => s + a.deposit, 0)
+  const advance = Math.min(Number(settings.advance_amount) || 200, rent)  // server computes the same
   const toggle = aid => setPicked(p => p.includes(aid) ? p.filter(x => x !== aid) : [...p, aid])
 
   async function submit() {
@@ -322,8 +323,10 @@ export function Book() {
           <dl className="kv card">
             {dress && <><dt>{t('dress')}</dt><dd>{dress.name}</dd></>}
             {chosen.length > 0 && <><dt>{t('extras_l')}</dt><dd>{chosen.map(a => a.name).join(', ')}</dd></>}
-            <dt>{t('paid')}</dt><dd>{rupee(done.rent_total)}</dd>
-            <dt>{t('deposit')}</dt><dd>{rupee(done.deposit_total)} · {t('dep_at_pickup')}</dd>
+            <dt>{t('advance_paid')}</dt><dd>{rupee(done.advance)}</dd>
+            <dt>{t('rent')}</dt><dd>{rupee(done.rent_total)}</dd>
+            <dt>{t('deposit')}</dt><dd>{rupee(done.deposit_total)}</dd>
+            <dt>{t('at_pickup')}</dt><dd>{rupee(done.rent_total - done.advance + done.deposit_total)}</dd>
           </dl>
         </main>
         <div className="cta col">
@@ -385,9 +388,10 @@ export function Book() {
           )}
           <label className="field"><span className="lbl">{t('anything_else')}</span>
             <textarea className="input" rows="2" placeholder={t('anything_ph')} value={notes} onChange={e => setNotes(e.target.value)} /></label>
+          <Link to="/rules" className="link">{t('rules')} ›</Link>
         </main>
         <div className="cta">
-          <div className="sum">{t('pay_now')} · {rupee(deposit)} {t('dep_at_pickup')}<b>{rupee(rent)}</b></div>
+          <div className="sum">{t('pay_now')} · {t('rest_at_pickup', { amt: rupee(rent - advance + deposit) })}<b>{rupee(advance)}</b></div>
           <button className="btn" disabled={!date || (!id && !picked.length)} onClick={() => { setStep(2); window.scrollTo(0, 0) }}>{t('next')}</button>
         </div>
       </>
@@ -408,9 +412,9 @@ export function Book() {
               <button className="chip sm" onClick={() => navigator.clipboard?.writeText(upi).then(() => setCopied(true))}>{copied ? t('copied') : t('copy')}</button>
             </div>
           )}
-          <span>{t('pay_rent')} <b className="price">{rupee(rent)}</b> {t('now')}</span>
-          {upi && <a className="btn sm ghost" href={`upi://pay?pa=${encodeURIComponent(upi)}&pn=Sapna%20Garba&am=${rent}&cu=INR`}>{t('open_upi')}</a>}
-          {deposit > 0 && <span className="muted xs">{t('dep_note', { amt: rupee(deposit) })}</span>}
+          <span>{t('pay_advance')} <b className="price">{rupee(advance)}</b> {t('now')}</span>
+          {upi && <a className="btn sm ghost" href={`upi://pay?pa=${encodeURIComponent(upi)}&pn=Sapna%20Garba&am=${advance}&cu=INR`}>{t('open_upi')}</a>}
+          <span className="muted xs">{t('pickup_note', { rent: rupee(rent - advance), dep: rupee(deposit) })}</span>
         </div>
         <label className="drop">
           <input type="file" accept="image/*,.heic,.heif" className="sr" onChange={e => { setShot(e.target.files[0] || null); setErr('') }} />
@@ -502,8 +506,10 @@ export function Status() {
               </div>
             </div>
             <dl className="kv">
+              <dt>{t('advance_paid')}</dt><dd>{rupee(b.advance)}</dd>
               <dt>{t('rent')}</dt><dd>{rupee(b.rent_total)}</dd>
               <dt>{t('deposit')}</dt><dd>{rupee(b.deposit_total)}</dd>
+              <dt>{t('at_pickup')}</dt><dd>{rupee(b.rent_total - b.advance + b.deposit_total)}</dd>
             </dl>
             {b.admin_note && <p className="note">{b.admin_note}</p>}
             {['confirmed', 'out'].includes(b.status) && settings.pickup_rules && <p className="note pre">{settings.pickup_rules}</p>}

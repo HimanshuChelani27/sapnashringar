@@ -4,7 +4,7 @@ import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes, useLocation } 
 import { waLink } from './api'
 import { AppProvider, useApp, useT } from './ui'
 import { Availability, Book, DressDetail, Dresses, Extras, Home, Rules, Status } from './shop'
-import { AdminLayout, Day, DressesAdmin, DressForm, ExtrasAdmin, Grid, Login, Payments, Revenue, SettingsAdmin } from './admin'
+import { AdminLayout, Day, DressesAdmin, DressForm, ExtrasAdmin, Grid, Login, Payments, Rentals, Revenue, SettingsAdmin } from './admin'
 import './styles.css'
 
 function Shop() {
@@ -51,6 +51,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="bookings" element={<Payments />} />
           <Route path="day" element={<Day />} />
           <Route path="grid" element={<Grid />} />
+          <Route path="rentals" element={<Rentals />} />
           <Route path="revenue" element={<Revenue />} />
           <Route path="dresses" element={<DressesAdmin />} />
           <Route path="dresses/:id" element={<DressForm />} />

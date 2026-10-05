@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   rent_total INTEGER NOT NULL,
   deposit_total INTEGER NOT NULL,
   rent_paid_mode TEXT NOT NULL DEFAULT 'upi' CHECK (rent_paid_mode IN ('upi','cash')),
+  advance INTEGER NOT NULL DEFAULT 0,  -- paid when booking; rent balance + deposit at pickup
   screenshot TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending','confirmed','rejected','out','returned','cancelled')),

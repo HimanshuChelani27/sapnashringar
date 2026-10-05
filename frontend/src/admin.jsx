@@ -11,7 +11,8 @@ const patchBooking = (id, body) => api(`/admin/bookings/${id}`, { method: 'PATCH
 
 export function AdminLayout() {
   if (!getToken()) return <Navigate to="/admin/login" replace />
-  const tabs = [['bookings', 'Payments'], ['day', 'Day sheet'], ['grid', 'Availability'], ['revenue', 'Revenue'],
+  const tabs = [['bookings', 'Payments'], ['day', 'Day sheet'], ['grid', 'Availability'], ['rentals', 'Rentals'],
+    ['revenue', 'Revenue'],
     ['dresses', 'Dresses'], ['extras', 'Extras'], ['settings', 'Settings']]
   return (
     <div className="admin">
@@ -58,8 +59,18 @@ function waText(b, settings) {
   if (b.status === 'rejected' || b.status === 'cancelled')
     return `Hi ${b.name}, sorry, we could not confirm your booking ${b.code} (${what}, ${when}).${b.admin_note ? ' ' + b.admin_note : ''}`
   if (b.status === 'pending') return `Hi ${b.name}, about your booking ${b.code} (${what}, ${when}):`
-  return `Hi ${b.name}, your booking ${b.code} is confirmed ✅\n${what}\n${when}\nPlease bring ${rupee(b.deposit_total)} cash deposit at pickup.` +
-    (settings.pickup_rules ? `\n\n${settings.pickup_rules}` : '')
+  const link = b.dress_id ? `\n${location.origin}/garba/dresses/${b.dress_id}` : ''
+  const balance = b.rent_total - b.advance
+  return [
+    `Hi ${b.name}, your booking ${b.code} is confirmed ✅`,
+    `${what}${b.with_jewellery ? ' (with jewellery' + (b.jewellery_pref ? ': ' + b.jewellery_pref : '') + ')' : ''}`,
+    `Date: ${when}${link}`,
+    '',
+    `Advance received: ${rupee(b.advance)}`,
+    `Rent: ${rupee(b.rent_total)}`,
+    `Deposit (refundable): ${rupee(b.deposit_total)}`,
+    `Please pay at pickup: ${rupee(balance)} rent + ${rupee(b.deposit_total)} deposit = ${rupee(balance + b.deposit_total)}`,
+  ].join('\n') + (settings.pickup_rules ? `\n\n${settings.pickup_rules}` : '')
 }
 
 function Tick({ on, label, onChange, extra }) {
@@ -100,8 +111,9 @@ function BookingCard({ b, reload }) {
           {b.dress_name && <><dt>Dress</dt><dd>{b.dress_code} {b.dress_name}</dd></>}
           {b.with_jewellery ? <><dt>Jewellery</dt><dd>{b.jewellery_pref || 'Yes'}</dd></> : null}
           {b.addons && <><dt>Extras</dt><dd>{b.addons}</dd></>}
-          <dt>Rent</dt><dd>{rupee(b.rent_total)} · {b.rent_paid_mode.toUpperCase()}</dd>
-          <dt>Deposit</dt><dd>{rupee(b.deposit_total)} cash</dd>
+          <dt>Rent</dt><dd>{rupee(b.rent_total)}</dd>
+          <dt>Advance</dt><dd>{rupee(b.advance)}{b.advance ? ` · ${b.source === 'online' ? 'UPI' : b.rent_paid_mode.toUpperCase()}` : ''}</dd>
+          <dt>At pickup</dt><dd>{rupee(b.rent_total - b.advance)} + {rupee(b.deposit_total)} dep.</dd>
           <dt>Source</dt><dd>{b.source === 'online' ? 'Online' : 'Shop'} · {b.code}</dd>
         </dl>
       </div>
@@ -119,7 +131,7 @@ function BookingCard({ b, reload }) {
       )}
       {live && (
         <div className="list">
-          <Tick on={b.deposit_collected_at} label={`Deposit ${rupee(b.deposit_total)} collected`} onChange={v => patch({ deposit_collected: v })} />
+          <Tick on={b.deposit_collected_at} label={`Collected ${rupee(b.rent_total - b.advance)} rent + ${rupee(b.deposit_total)} deposit`} onChange={v => patch({ deposit_collected: v })} />
           <Tick on={b.handed_over_at} label="Handed over" onChange={v => patch({ handed_over: v })} />
           <Tick on={b.returned_at} label="Returned" onChange={v => patch({ returned: v })} />
           <Tick on={b.deposit_refunded} label={`Deposit refunded ${rupee(b.deposit_total - ded)}`}
@@ -185,6 +197,7 @@ function ShopBooking({ dress, date, onClose, onSaved }) {
   // null = list price; a typed number = the price agreed with the customer
   const [rent, setRent] = useState(null)
   const [dep, setDep] = useState(null)
+  const [adv, setAdv] = useState('')
   const [err, setErr] = useState('')
   const listRent = dress.rent + (f.with_jewellery ? dress.jewellery_price : 0)
   const changed = (rent !== null && Number(rent) !== listRent) || (dep !== null && Number(dep) !== dress.deposit)
@@ -193,7 +206,7 @@ function ShopBooking({ dress, date, onClose, onSaved }) {
   const save = async e => {
     e.preventDefault()
     try {
-      await api('/admin/bookings', { method: 'POST', admin: true, body: form({ ...f, dress_id: dress.id, date, rent: num(rent), deposit: num(dep) }) })
+      await api('/admin/bookings', { method: 'POST', admin: true, body: form({ ...f, dress_id: dress.id, date, rent: num(rent), deposit: num(dep), advance: num(adv) ?? 0 }) })
       onSaved()
     } catch (x) { setErr(x.message) }
   }
@@ -215,9 +228,11 @@ function ShopBooking({ dress, date, onClose, onSaved }) {
           <label className="field grow"><span className="lbl">Deposit ₹</span>
             <input className="input" type="number" min="0" inputMode="numeric" value={dep ?? dress.deposit} onChange={e => setDep(e.target.value)} /></label>
         </div>
+        <label className="field"><span className="lbl">Advance taken now ₹ (rest at pickup)</span>
+          <input className="input" type="number" min="0" inputMode="numeric" placeholder="0" value={adv} onChange={e => setAdv(e.target.value)} /></label>
         {changed && <span className="muted xs">Special price. List price is {rupee(listRent)} rent · {rupee(dress.deposit)} deposit.</span>}
         <div className="seg">
-          {['cash', 'upi'].map(m => <button type="button" key={m} className={f.rent_paid_mode === m ? 'on' : ''} onClick={() => setF({ ...f, rent_paid_mode: m })}>Rent paid by {m.toUpperCase()}</button>)}
+          {['cash', 'upi'].map(m => <button type="button" key={m} className={f.rent_paid_mode === m ? 'on' : ''} onClick={() => setF({ ...f, rent_paid_mode: m })}>Advance by {m.toUpperCase()}</button>)}
         </div>
         <input className="input" placeholder="Notes (optional)" value={f.notes} onChange={set('notes')} />
         {err && <p className="err">{err}</p>}
@@ -333,6 +348,48 @@ export function Grid() {
   )
 }
 
+// ---------- rentals: which dresses went out on a day, and what each earned ----------
+export function Rentals() {
+  const [date, setDate] = useState(today())
+  const [list, err] = useApi(`/admin/bookings?date=${date}&status=confirmed,out,returned`)
+  const total = k => (list || []).reduce((s, b) => s + b[k], 0)
+  return (
+    <main className="body">
+      <div className="row between">
+        <h1 className="h sm">{fmtDate(date, 'en', { weekday: 'long', day: 'numeric', month: 'short' })}</h1>
+        <input className="input tiny wide" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} aria-label="Pick date" />
+      </div>
+      <DateStrip value={date} onChange={setDate} from={addDays(today(), -10)} days={40} />
+      {!list ? <Loading err={err} /> : (
+        <>
+          <div className="grid2">
+            <div className="card"><span className="lbl">Dresses on rent</span><div className="price lg">{list.length}</div></div>
+            <div className="card"><span className="lbl">Rent earned</span><div className="price lg">{rupee(total('rent_total'))}</div>
+              <span className="muted xs">Advance {rupee(total('advance'))} · At pickup {rupee(total('rent_total') - total('advance'))}</span></div>
+          </div>
+          {!list.length ? <p className="muted center">No confirmed rentals on this day.</p> : (
+            <div className="grid2">
+              {list.map(b => (
+                <div key={b.id} className="dcard">
+                  {b.dress_photo
+                    ? <a href={img(b.dress_photo)} target="_blank" rel="noreferrer"><Photo src={thumb(b.dress_photo)} alt={b.dress_name} /></a>
+                    : <Photo tone={(b.id % 6) + 1} alt="" />}
+                  <div className="in">
+                    <span className="nm"><b>{b.dress_code}</b> {b.dress_name || b.addons}</span>
+                    <span className="price">{rupee(b.rent_total)}</span>
+                    <span className="muted xs">{b.name} · {b.source === 'online' ? 'Online' : 'Shop'}</span>
+                    <span className="muted xs">Advance {rupee(b.advance)}{b.deposit_collected_at ? ' · paid in full' : ''}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </main>
+  )
+}
+
 // ---------- revenue ----------
 export function Revenue() {
   const { settings } = useApp()
@@ -358,20 +415,20 @@ export function Revenue() {
       {!data ? <Loading err={err} /> : (
         <>
           <div className="grid2">
-            <div className="card"><span className="lbl">Rent earned</span><div className="price lg">{rupee(T.rent)}</div><span className="muted xs">UPI {rupee(T.rent_upi)} · Cash {rupee(T.rent_cash)}</span></div>
+            <div className="card"><span className="lbl">Rent earned</span><div className="price lg">{rupee(T.rent)}</div><span className="muted xs">Advance {rupee(T.advance)} · At pickup {rupee(T.balance)}</span></div>
             <div className="card"><span className="lbl">Deposits held</span><div className="price lg warn">{rupee(T.deposit_held)}</div><span className="muted xs">still to return</span></div>
             <div className="card"><span className="lbl">Bookings</span><div className="price lg">{T.bookings}</div></div>
             <div className="card"><span className="lbl">Deductions kept</span><div className="price lg">{rupee(T.deductions)}</div><span className="muted xs">damage / late</span></div>
           </div>
           <div className="card scrollx">
             <table className="tbl">
-              <thead><tr><th>Date</th><th>Rent UPI</th><th>Rent cash</th><th>Dep. in</th><th>Dep. out</th><th>Kept</th></tr></thead>
+              <thead><tr><th>Date</th><th>Rent</th><th>Advance</th><th>At pickup</th><th>Dep. in</th><th>Dep. out</th><th>Kept</th></tr></thead>
               <tbody>
                 {data.days.map(d => (
-                  <tr key={d.date}><td>{fmtDate(d.date)}</td><td>{rupee(d.rent_upi)}</td><td>{rupee(d.rent_cash)}</td>
+                  <tr key={d.date}><td>{fmtDate(d.date)}</td><td>{rupee(d.rent)}</td><td>{rupee(d.advance)}</td><td>{rupee(d.balance)}</td>
                     <td>{rupee(d.deposit_in)}</td><td>{rupee(d.deposit_out)}</td><td>{rupee(d.deductions)}</td></tr>
                 ))}
-                {!data.days.length && <tr><td colSpan="6" className="muted">No bookings in this range.</td></tr>}
+                {!data.days.length && <tr><td colSpan="7" className="muted">No bookings in this range.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -564,6 +621,7 @@ export function SettingsAdmin() {
         </div>
         {field('whatsapp_number', 'WhatsApp number (customers message this)', { type: 'tel', placeholder: '98250 12345' })}
         {field('navratri_start', 'Navratri first night (labels Night 1–9)', { type: 'date' })}
+        {field('advance_amount', 'Advance customers pay online when booking (₹)', { type: 'number', min: 0, placeholder: '200' })}
         {field('shop_address', 'Shop address', { rows: 2 })}
         {field('pickup_rules', 'Pickup & return rules (shown to customers)', { rows: 5, placeholder: 'Pickup 11am–5pm on the day. Return by 1pm next day. Late return ₹200/day. Bring photo ID.' })}
         {msg && <p className={msg === 'Saved' ? 'ok' : 'err'}>{msg}</p>}
