@@ -53,24 +53,35 @@ export function Login() {
 }
 
 // ---------- booking card (payments + day sheet) ----------
-function waText(b, settings) {
-  const what = [b.dress_name, b.addons].filter(Boolean).join(' + ')
+// Links in WhatsApp messages always use the real domain, even if admin is opened on the railway.app address.
+const SITE = 'https://www.sapnashringar.com'
+
+/** kind: 'confirmed' | 'rejected' | 'updated' | undefined (= from the booking's status) */
+function waText(b, settings, kind) {
+  kind = kind || (['rejected', 'cancelled'].includes(b.status) ? 'rejected' : b.status === 'pending' ? 'pending' : 'confirmed')
+  const what = [b.dress_name, b.addons].filter(Boolean).join(' + ') +
+    (b.with_jewellery ? ' (with jewellery' + (b.jewellery_pref ? ': ' + b.jewellery_pref : '') + ')' : '')
   const when = fmtDate(b.date)
-  if (b.status === 'rejected' || b.status === 'cancelled')
-    return `Hi ${b.name}, sorry, we could not confirm your booking ${b.code} (${what}, ${when}).${b.admin_note ? ' ' + b.admin_note : ''}`
-  if (b.status === 'pending') return `Hi ${b.name}, about your booking ${b.code} (${what}, ${when}):`
-  const link = b.dress_id ? `\n${location.origin}/garba/dresses/${b.dress_id}` : ''
-  const balance = b.rent_total - b.advance
+  if (kind === 'rejected')
+    return [
+      `Hi ${b.name}, sorry 🙏 we could not confirm your booking ${b.code} (${what}, ${when}).`,
+      b.admin_note && `Reason: ${b.admin_note}`,
+      `You can choose another outfit here: ${SITE}/garba/home`,
+    ].filter(Boolean).join('\n')
+  if (kind === 'pending') return `Hi ${b.name}, about your booking ${b.code} (${what}, ${when}):`
+  const left = b.rent_total - b.advance + b.deposit_total
   return [
-    `Hi ${b.name}, your booking ${b.code} is confirmed ✅`,
-    `${what}${b.with_jewellery ? ' (with jewellery' + (b.jewellery_pref ? ': ' + b.jewellery_pref : '') + ')' : ''}`,
-    `Date: ${when}${link}`,
+    kind === 'updated' ? `Hi ${b.name}, your booking ${b.code} has been updated ✏️` : `Hi ${b.name}, your booking ${b.code} is confirmed ✅`,
+    what,
+    `Date: ${when}`,
+    b.dress_id && `${SITE}/garba/dresses/${b.dress_id}`,
     '',
     `Advance received: ${rupee(b.advance)}`,
     `Rent: ${rupee(b.rent_total)}`,
     `Deposit (refundable): ${rupee(b.deposit_total)}`,
-    `Please pay at pickup: ${rupee(balance)} rent + ${rupee(b.deposit_total)} deposit = ${rupee(balance + b.deposit_total)}`,
-  ].join('\n') + (settings.pickup_rules ? `\n\n${settings.pickup_rules}` : '')
+    `Please pay at pickup: Rent ${rupee(b.rent_total)} − Advance ${rupee(b.advance)} + Deposit ${rupee(b.deposit_total)} = ${rupee(left)}`,
+  ].filter(x => x !== false && x !== undefined && x !== null).join('\n') +
+    (kind === 'confirmed' && settings.pickup_rules ? `\n\n${settings.pickup_rules}` : '')
 }
 
 function Tick({ on, label, onChange, extra }) {
@@ -82,13 +93,113 @@ function Tick({ on, label, onChange, extra }) {
   )
 }
 
+const REJECT_REASONS = ['Payment not received', 'Payment screenshot is not clear', 'Dress not available on that day']
+
+/** After approve / reject / edit: keep the card on screen with the right WhatsApp message until "Done". */
+function AfterAction({ b, kind, onDone }) {
+  const { settings } = useApp()
+  const label = { confirmed: 'Approved', rejected: 'Rejected', updated: 'Booking updated' }[kind]
+  return (
+    <div className="note col">
+      <b>✓ {label}. Now send WhatsApp to {b.name.split(' ')[0]}:</b>
+      {b.phone
+        ? <a className="btn sm wa" href={waLink(b.phone, waText(b, settings, kind))} target="_blank" rel="noreferrer">Send WhatsApp</a>
+        : <span className="muted xs">No phone number on this booking.</span>}
+      <button className="linkbtn xs" onClick={onDone}>Done</button>
+    </div>
+  )
+}
+
+function RejectBox({ b, onReject, onClose }) {
+  const [reason, setReason] = useState('')
+  const [refund, setRefund] = useState(false)
+  const note = reason.trim() + (refund && b.advance ? `. Your advance of ${rupee(b.advance)} will be refunded.` : '')
+  return (
+    <div className="card col">
+      <b>Why are you rejecting? (the customer sees this)</b>
+      <div className="wrapchips">{REJECT_REASONS.map(r => <button key={r} className="chip sm" onClick={() => setReason(r)}>{r}</button>)}</div>
+      <input className="input" placeholder="Type the reason" value={reason} onChange={e => setReason(e.target.value)} autoFocus />
+      {b.advance > 0 && (
+        <label className="check"><input type="checkbox" checked={refund} onChange={e => setRefund(e.target.checked)} />
+          <span className="grow">Advance {rupee(b.advance)} was received — tell them it will be refunded</span></label>
+      )}
+      <div className="row">
+        <button className="btn sm ghost grow" onClick={onClose}>Back</button>
+        <button className="btn sm grow2" disabled={!reason.trim()} onClick={() => onReject(note)}>Reject booking</button>
+      </div>
+    </div>
+  )
+}
+
+function EditBooking({ b, onClose, onSaved }) {
+  const [dresses] = useApi('/admin/dresses')
+  const [f, setF] = useState({ name: b.name, phone: b.phone, date: b.date, dress_id: b.dress_id, rent_total: b.rent_total,
+    deposit_total: b.deposit_total, advance: b.advance, notes: b.notes })
+  const [err, setErr] = useState('')
+  const set = k => e => setF({ ...f, [k]: e.target.value })
+  const pickDress = e => {
+    const d = dresses.find(x => String(x.id) === e.target.value)
+    setF({ ...f, dress_id: d.id, rent_total: d.rent, deposit_total: d.deposit })  // new dress: its prices, editable
+  }
+  const chosen = dresses?.find(x => x.id === f.dress_id)
+  const save = async e => {
+    e.preventDefault()
+    try {
+      const body = { ...f, rent_total: Number(f.rent_total) || 0, deposit_total: Number(f.deposit_total) || 0, advance: Number(f.advance) || 0 }
+      if (!f.dress_id) delete body.dress_id
+      onSaved(await patchBooking(b.id, body))
+    } catch (x) { setErr(x.message) }
+  }
+  return (
+    <>
+      <div className="scrim" onClick={onClose} />
+      <form className="sheet" onSubmit={save}>
+        <div className="grab" />
+        <b>Edit booking {b.code}</b>
+        <div className="row">
+          <label className="field grow"><span className="lbl">Name</span><input className="input" value={f.name} onChange={set('name')} required /></label>
+          <label className="field grow"><span className="lbl">Phone</span><input className="input" type="tel" inputMode="numeric" value={f.phone} onChange={set('phone')} /></label>
+        </div>
+        <label className="field"><span className="lbl">Date</span><input className="input" type="date" value={f.date} onChange={set('date')} required /></label>
+        {b.dress_id && (
+          <div className="row">
+            <Photo src={thumb(chosen?.photos[0]?.path)} className="mini" tone={((f.dress_id || 0) % 6) + 1} />
+            <label className="field grow"><span className="lbl">Dress</span>
+              {!dresses ? <Loading /> : (
+                <select className="input" value={f.dress_id} onChange={pickDress}>
+                  {dresses.map(d => <option key={d.id} value={d.id}>{d.code} {d.name} · {rupee(d.rent)}</option>)}
+                </select>
+              )}</label>
+          </div>
+        )}
+        <div className="row">
+          <label className="field grow"><span className="lbl">Rent ₹</span><input className="input" type="number" min="0" inputMode="numeric" value={f.rent_total} onChange={set('rent_total')} /></label>
+          <label className="field grow"><span className="lbl">Deposit ₹</span><input className="input" type="number" min="0" inputMode="numeric" value={f.deposit_total} onChange={set('deposit_total')} /></label>
+          <label className="field grow"><span className="lbl">Advance ₹</span><input className="input" type="number" min="0" inputMode="numeric" value={f.advance} onChange={set('advance')} /></label>
+        </div>
+        <span className="muted xs">At pickup: {rupee((Number(f.rent_total) || 0) - (Number(f.advance) || 0) + (Number(f.deposit_total) || 0))}</span>
+        <label className="field"><span className="lbl">Notes</span><input className="input" value={f.notes} onChange={set('notes')} /></label>
+        {err && <p className="err">{err}</p>}
+        <div className="row">
+          <button type="button" className="btn ghost grow" onClick={onClose}>Cancel</button>
+          <button className="btn grow2">Save changes</button>
+        </div>
+      </form>
+    </>
+  )
+}
+
 function BookingCard({ b, reload }) {
   const { settings } = useApp()
-  const [note, setNote] = useState(b.admin_note)
   const [ded, setDed] = useState(b.deduction)
   const [err, setErr] = useState('')
+  const [rejecting, setRejecting] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [after, setAfter] = useState(null)   // { b, kind } after approve / reject / edit
   const patch = body => { setErr(''); patchBooking(b.id, body).then(reload).catch(e => setErr(e.message)) }
+  const act = (body, kind) => { setErr(''); patchBooking(b.id, body).then(nb => setAfter({ b: nb, kind })).catch(e => setErr(e.message)) }
   const live = ['confirmed', 'out', 'returned'].includes(b.status)
+  if (after) b = after.b
   return (
     <article className="card col">
       <div className="row between">
@@ -118,31 +229,39 @@ function BookingCard({ b, reload }) {
         </dl>
       </div>
       {b.notes && <p className="note">“{b.notes}”</p>}
-      {b.status === 'pending' && (
+      {b.admin_note && ['rejected', 'cancelled'].includes(b.status) && <p className="muted xs">Reason: {b.admin_note}</p>}
+      {after ? <AfterAction b={after.b} kind={after.kind} onDone={() => { setAfter(null); reload() }} /> : (
         <>
-          {b.screenshot && <span className="muted xs">Tap "Payment" to zoom. Match the amount and UTR in your bank app.</span>}
-          <input className="input" placeholder="Note to customer (e.g. reason for rejecting)" value={note}
-            onChange={e => setNote(e.target.value)} />
-          <div className="row">
-            <button className="btn sm ghost grow" onClick={() => patch({ status: 'rejected', admin_note: note })}>Reject</button>
-            <button className="btn sm grow2" onClick={() => patch({ status: 'confirmed', admin_note: note })}>Approve</button>
+          {b.status === 'pending' && !rejecting && (
+            <>
+              {b.screenshot && <span className="muted xs">Tap "Payment" to zoom. Match the amount and UTR in your bank app.</span>}
+              <div className="row">
+                <button className="btn sm ghost grow" onClick={() => setRejecting(true)}>Reject</button>
+                <button className="btn sm grow2" onClick={() => act({ status: 'confirmed' }, 'confirmed')}>Approve</button>
+              </div>
+            </>
+          )}
+          {rejecting && <RejectBox b={b} onClose={() => setRejecting(false)} onReject={note => act({ status: 'rejected', admin_note: note }, 'rejected')} />}
+          {live && (
+            <div className="list">
+              <Tick on={b.deposit_collected_at} label={`Collected ${rupee(b.rent_total - b.advance)} rent + ${rupee(b.deposit_total)} deposit`} onChange={v => patch({ deposit_collected: v })} />
+              <Tick on={b.handed_over_at} label="Handed over" onChange={v => patch({ handed_over: v })} />
+              <Tick on={b.returned_at} label="Returned" onChange={v => patch({ returned: v })} />
+              <Tick on={b.deposit_refunded} label={`Deposit refunded ${rupee(b.deposit_total - ded)}`}
+                onChange={v => patch({ deposit_refunded: v, deduction: Number(ded) || 0 })}
+                extra={<input className="input tiny" type="number" min="0" max={b.deposit_total} value={ded} aria-label="Deduction"
+                  title="Deduction for damage / late" onChange={e => setDed(e.target.value)} onBlur={() => Number(ded) !== b.deduction && patch({ deduction: Number(ded) || 0 })} />} />
+            </div>
+          )}
+          {err && <p className="err">{err}</p>}
+          <div className="row between">
+            {['pending', 'confirmed', 'out'].includes(b.status) && <button className="linkbtn" onClick={() => setEditing(true)}>✏️ Edit booking</button>}
+            {live && <button className="linkbtn xs danger" onClick={() => patch({ status: 'cancelled' })}>Cancel booking</button>}
           </div>
+          {b.phone && <a className="btn sm wa" href={waLink(b.phone, waText(b, settings))} target="_blank" rel="noreferrer">Send WhatsApp to {b.name.split(' ')[0]}</a>}
         </>
       )}
-      {live && (
-        <div className="list">
-          <Tick on={b.deposit_collected_at} label={`Collected ${rupee(b.rent_total - b.advance)} rent + ${rupee(b.deposit_total)} deposit`} onChange={v => patch({ deposit_collected: v })} />
-          <Tick on={b.handed_over_at} label="Handed over" onChange={v => patch({ handed_over: v })} />
-          <Tick on={b.returned_at} label="Returned" onChange={v => patch({ returned: v })} />
-          <Tick on={b.deposit_refunded} label={`Deposit refunded ${rupee(b.deposit_total - ded)}`}
-            onChange={v => patch({ deposit_refunded: v, deduction: Number(ded) || 0 })}
-            extra={<input className="input tiny" type="number" min="0" max={b.deposit_total} value={ded} aria-label="Deduction"
-              title="Deduction for damage / late" onChange={e => setDed(e.target.value)} onBlur={() => Number(ded) !== b.deduction && patch({ deduction: Number(ded) || 0 })} />} />
-        </div>
-      )}
-      {live && <button className="linkbtn xs" onClick={() => patch({ status: 'cancelled' })}>Cancel booking</button>}
-      {err && <p className="err">{err}</p>}
-      {b.phone && <a className="btn sm wa" href={waLink(b.phone, waText(b, settings))} target="_blank" rel="noreferrer">Send WhatsApp to {b.name.split(' ')[0]}</a>}
+      {editing && <EditBooking b={b} onClose={() => setEditing(false)} onSaved={nb => { setEditing(false); setAfter({ b: nb, kind: 'updated' }) }} />}
     </article>
   )
 }

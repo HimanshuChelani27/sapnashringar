@@ -484,6 +484,15 @@ class BookingPatch(BaseModel):
     deposit_refunded: bool | None = None
     deduction: int | None = None
     deduction_note: str | None = None
+    # edit booking
+    name: str | None = None
+    phone: str | None = None
+    date: str | None = None
+    dress_id: int | None = None
+    rent_total: int | None = None
+    deposit_total: int | None = None
+    advance: int | None = None
+    notes: str | None = None
 
 
 @adm.patch("/bookings/{bid}")
@@ -507,17 +516,39 @@ def patch_booking(bid: int, p: BookingPatch):
         u["deposit_collected_at"] = now if p.deposit_collected else None
     if p.deposit_refunded is not None:
         u["deposit_refunded"] = int(p.deposit_refunded)
+    if p.name is not None:
+        if not p.name.strip():
+            raise HTTPException(400, "Name can't be empty")
+        u["name"] = p.name.strip()[:80]
+    if p.phone is not None:
+        u["phone"] = clean_phone(p.phone) if p.phone.strip() else ""
+    if p.date is not None:
+        u["date"] = parse_date(p.date)
+    if p.dress_id is not None and p.dress_id != b["dress_id"]:
+        if not one("SELECT 1 FROM dresses WHERE id=?", (p.dress_id,)):
+            raise HTTPException(404, "Dress not found")
+        u["dress_id"] = p.dress_id
+    for k in ("rent_total", "deposit_total", "advance"):
+        if getattr(p, k) is not None:
+            if getattr(p, k) < 0:
+                raise HTTPException(400, "Amounts can't be negative")
+            u[k] = getattr(p, k)
+    if p.notes is not None:
+        u["notes"] = p.notes[:500]
+    merged = {**b, **u}
+    if merged["advance"] > merged["rent_total"]:
+        raise HTTPException(400, "Advance can't be more than the rent")
     if p.deduction is not None:
-        if not 0 <= p.deduction <= b["deposit_total"]:
-            raise HTTPException(400, "Deduction can't be more than the deposit")
-        u["deduction"] = p.deduction
+        u["deduction"] = merged["deduction"] = p.deduction
+    if not 0 <= merged["deduction"] <= merged["deposit_total"]:
+        raise HTTPException(400, "Deduction can't be more than the deposit")
     for k in ("admin_note", "deduction_note"):
         if getattr(p, k) is not None:
             u[k] = getattr(p, k)[:500]
     try:
         update("bookings", bid, u)
     except sqlite3.IntegrityError:
-        raise HTTPException(409, "Another booking already holds this dress for that date")
+        raise HTTPException(409, "This dress is already booked on that date. Pick another date or dress.")
     return one(BOOKING_SQL + " WHERE b.id=?", (bid,))
 
 

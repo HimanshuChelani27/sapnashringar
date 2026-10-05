@@ -70,6 +70,17 @@ def test_full_flow():
     # re-approving the rejected one now conflicts
     assert c.patch(f"/api/admin/bookings/{b['id']}", headers=H, json={"status": "confirmed"}).status_code == 409
 
+    # edit: move a booking onto a taken night -> refused; change name/date/prices -> saved
+    later = (date.today() + timedelta(days=6)).isoformat()
+    other = c.post("/api/admin/bookings", headers=H, data={"dress_id": did, "date": later, "name": "Neha"}).json()
+    E = f"/api/admin/bookings/{other['id']}"
+    assert c.patch(E, headers=H, json={"date": DAY}).status_code == 409
+    assert c.patch(E, headers=H, json={"advance": 99999}).status_code == 400  # advance > rent
+    ed = c.patch(E, headers=H, json={"name": "Neha Shah", "date": (date.today() + timedelta(days=7)).isoformat(),
+                                     "rent_total": 700, "deposit_total": 1400, "advance": 200}).json()
+    assert (ed["name"], ed["rent_total"], ed["deposit_total"], ed["advance"]) == ("Neha Shah", 700, 1400, 200)
+    c.patch(E, headers=H, json={"status": "cancelled"})
+
     # deposit lifecycle
     for patch in ({"deposit_collected": True}, {"handed_over": True}, {"returned": True},
                   {"deposit_refunded": True, "deduction": 200}):
